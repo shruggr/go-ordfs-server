@@ -3,6 +3,7 @@ package ordinals
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/bitcoin-sv/go-templates/template/bitcom"
 	"github.com/bitcoin-sv/go-templates/template/inscription"
@@ -278,6 +279,11 @@ func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoin
 }
 
 func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, version int, targetOutpoint *transaction.Outpoint, includeMap bool) (*ResolveResult, error) {
+	slog.Debug("Resolve started",
+		"origin", origin.String(),
+		"version", version,
+		"includeMap", includeMap)
+
 	versionsKey := fmt.Sprintf("versions:%s", origin.String())
 	spendsKey := fmt.Sprintf("spends:%s", origin.String())
 	mapKey := fmt.Sprintf("map:%s", origin.String())
@@ -290,6 +296,9 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 		if len(versionMembers) > 0 {
 			targetOut, _ = transaction.OutpointFromString(versionMembers[0].Member.(string))
 			targetRank = int64(versionMembers[0].Score)
+			slog.Debug("Found cached version", "version", version, "outpoint", targetOut.String())
+		} else {
+			slog.Debug("Version not in cache, will crawl", "version", version)
 		}
 	}
 
@@ -339,7 +348,17 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 	currentVersionCount := t.cache.ZCard(ctx, versionsKey).Val()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		currentSequence++
+
+		slog.Debug("Crawling",
+			"sequence", currentSequence,
+			"outpoint", currentOutpoint.String())
 
 		tx, err := t.txLoader.LoadTx(ctx, currentOutpoint.Txid.String())
 		if err != nil {
@@ -358,6 +377,30 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 			contentType = scriptData.ContentType
 			content = scriptData.Content
 
+			if len(scriptData.MapData) > 0 {
+				t.cache.ZAdd(ctx, mapKey, redis.Z{
+					Score:  float64(currentSequence),
+					Member: currentOutpoint.String(),
+				})
+				if includeMap {
+					if mergedMap == nil {
+						mergedMap = make(map[string]string)
+					}
+					for k, v := range scriptData.MapData {
+						mergedMap[k] = v
+					}
+				}
+			}
+
+			if version >= 0 && currentVersionCount == int64(version) {
+				return &ResolveResult{
+					Outpoint:    currentOutpoint,
+					ContentType: contentType,
+					Content:     content,
+					MergedMap:   mergedMap,
+				}, nil
+			}
+
 			if currentSequence > 0 {
 				t.cache.ZAdd(ctx, versionsKey, redis.Z{
 					Score:  float64(currentSequence),
@@ -367,27 +410,6 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 			currentVersionCount++
 		} else if currentSequence == 0 {
 			return nil, fmt.Errorf("no inscription found at origin")
-		}
-
-		if len(scriptData.MapData) > 0 {
-			t.cache.ZAdd(ctx, mapKey, redis.Z{
-				Score:  float64(currentSequence),
-				Member: currentOutpoint.String(),
-			})
-			if includeMap {
-				for k, v := range scriptData.MapData {
-					mergedMap[k] = v
-				}
-			}
-		}
-
-		if version >= 0 && currentVersionCount == int64(version) {
-			return &ResolveResult{
-				Outpoint:    currentOutpoint,
-				ContentType: contentType,
-				Content:     content,
-				MergedMap:   mergedMap,
-			}, nil
 		}
 
 		nextOutpoint, err := t.ResolveSpend(ctx, currentOutpoint)

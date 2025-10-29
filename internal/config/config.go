@@ -10,6 +10,7 @@ type Config struct {
 	BlockHeadersURL   string
 	BlockHeadersToken string
 	OrdfsHost         string
+	LogLevel          string
 }
 
 func Load() *Config {
@@ -21,6 +22,7 @@ func Load() *Config {
 		BlockHeadersURL:   getEnv("BLOCK_HEADERS_URL", "https://block-headers.gorillapool.io"),
 		BlockHeadersToken: getEnv("BLOCK_HEADERS_TOKEN", ""),
 		OrdfsHost:         getEnv("ORDFS_HOST", ""),
+		LogLevel:          getEnv("LOG_LEVEL", "info"),
 	}
 }
 
