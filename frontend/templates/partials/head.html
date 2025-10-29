@@ -1,0 +1,73 @@
+{{define "head"}}
+<meta charset="UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>
+  {{if .OrdfsName}}{{.OrdfsName}}{{else}}ORD-FS Server{{end}}
+</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link
+  rel="icon"
+  href="/eb6f151ee52b5d65cb89481e89e76655e6af83f697f0af88b7ccf46e3174baaa_0"
+/>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@1,600&display=swap"
+  rel="stylesheet"
+/>
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:site" content="@1satordinals" />
+<meta
+  name="twitter:title"
+  content="{{if .OrdfsName}}{{.OrdfsName}}{{else}}ORD-FS{{end}}"
+/>
+<meta name="twitter:description" content="Bitcoin > Internet" />
+<meta
+  name="twitter:image"
+  content="https://ordfs.network/48727ca4228aae51909d4e745eaf32630280ba30330eac2701d7147898e16133_0"
+/>
+<script
+  src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.23.1/ace.min.js"
+  integrity="sha512-Jvb+MTAHCHRq5MfeTXL4V7bdkKG5ybsUbjyjHaNEKUFby4qEs8Id3mVcb2S5ft+v/SV00r+/hTOyzmJ0Rif0qQ=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"
+></script>
+
+<style>
+  body {
+    padding-top: 50px;
+  }
+  h1,
+  h2 {
+    font-family: "Rubik", sans-serif;
+  }
+  :root {
+    --primary: #111111;
+    --secondary: #333333;
+  }
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--secondary) var(--primary);
+  }
+
+  /* Chrome, Edge, and Safari */
+  *::-webkit-scrollbar {
+    width: 15px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--primary);
+    border-radius: 5px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--secondary);
+    border-radius: 14px;
+    border: 3px solid var(--primary);
+  }
+</style>
+{{end}}
