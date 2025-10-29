@@ -3,7 +3,7 @@ module github.com/shruggr/go-ordfs-server
 go 1.25.3
 
 require (
-	github.com/b-open-io/overlay v0.0.0-00010101000000-000000000000
+	github.com/b-open-io/overlay v0.0.0-20251002143135-9e12c8fe490a
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
 	github.com/bsv-blockchain/go-sdk v1.2.10
 	github.com/gofiber/fiber/v2 v2.52.9
@@ -44,8 +44,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/bsv-blockchain/go-sdk => ../go-sdk
-
-replace github.com/bitcoin-sv/go-templates => ../go-templates
-
-replace github.com/b-open-io/overlay => ../overlay
+replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20251029205829-c7fc3fb6f034

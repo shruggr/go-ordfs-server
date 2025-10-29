@@ -144,7 +144,7 @@ paths:
         Supports:
         - Transaction ID (64 hex chars) - returns first inscription found
         - Outpoint format (txid_vout) - returns content at specific output
-        - Version parameter for ordinal tracking
+        - Sequence parameter for ordinal tracking
         - MAP protocol metadata extraction
       operationId: getContent
       tags:
@@ -156,14 +156,14 @@ paths:
           description: Transaction ID or outpoint (txid_vout format)
           schema:
             type: string
-        - name: version
+        - name: seq
           in: query
           required: false
           description: |
-            Ordinal version to retrieve (only applies to outpoints):
+            Ordinal sequence to retrieve (only applies to outpoints):
             - 0 = first inscription (default)
             - N = Nth reinscription
-            - -1 = latest version (last unspent location)
+            - -1 = latest sequence (last unspent location)
           schema:
             type: integer
             default: 0
@@ -201,8 +201,8 @@ paths:
                 type: string
               description: |
                 Caching directive:
-                - version=-1: "public, max-age=60" (latest version, short cache)
-                - version>=0: "public, max-age=86400, immutable" (specific version, long cache)
+                - seq=-1: "public, max-age=60" (latest sequence, short cache)
+                - seq>=0: "public, max-age=86400, immutable" (specific sequence, long cache)
           content:
             '*/*':
               schema:
@@ -268,7 +268,7 @@ paths:
         Returns content based on DNS TXT record for custom domains.
         If no DNS configuration found, returns "OrdFS Server".
 
-        DNS TXT record format: _ordfs.yourdomain.com → ordfs=<outpoint>[:version]
+        DNS TXT record format: _ordfs.yourdomain.com → ordfs=<outpoint>[:seq]
       operationId: getRoot
       tags:
         - DNS

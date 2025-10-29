@@ -72,7 +72,7 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 		resp, err = h.loadContentByOutpoint(
 			ctx,
 			outpoint,
-			c.QueryInt("version", 0),
+			c.QueryInt("seq", 0),
 			c.QueryBool("map", false),
 		)
 	}
@@ -88,8 +88,8 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 		})
 	}
 
-	version := c.QueryInt("version", 0)
-	return h.sendContentResponse(c, resp, version)
+	seq := c.QueryInt("seq", 0)
+	return h.sendContentResponse(c, resp, seq)
 }
 
 func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ContentResponse, version int) error {
