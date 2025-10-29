@@ -3,7 +3,7 @@ module github.com/shruggr/go-ordfs-server
 go 1.25.3
 
 require (
-	github.com/b-open-io/overlay v0.0.0-20251002143135-9e12c8fe490a
+	github.com/b-open-io/overlay v0.3.1-0.20251002143135-9e12c8fe490a
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
 	github.com/bsv-blockchain/go-sdk v1.2.10
 	github.com/gofiber/fiber/v2 v2.52.9
