@@ -49,7 +49,7 @@ func main() {
 	server := api.NewServer(cfg, redisCache)
 
 	go func() {
-		if err := server.Listen(cfg.Port); err != nil {
+		if err := server.Listen(":" + cfg.Port); err != nil {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
