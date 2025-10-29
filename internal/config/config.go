@@ -15,7 +15,7 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		Port:              getEnv("PORT", ":3000"),
+		Port:              getEnv("PORT", "3000"),
 		Environment:       getEnv("ENV", "development"),
 		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		JunglebusURL:      getEnv("JUNGLEBUS", "https://junglebus.gorillapool.io"),
