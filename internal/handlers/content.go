@@ -136,6 +136,7 @@ func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, 
 		Content:     []byte(content),
 		Outpoint:    resolvedOutpoint,
 		Sequence:    sequence,
+		Output:      []byte(cached["output"]),
 	}
 
 	if includeMap {
@@ -155,6 +156,7 @@ func (h *ContentHandler) cacheContentResponse(ctx context.Context, cacheKey stri
 		"content":     response.Content,
 		"outpoint":    response.Outpoint.String(),
 		"sequence":    fmt.Sprintf("%d", response.Sequence),
+		"output":      response.Output,
 	}
 
 	if len(response.MergedMap) > 0 {
@@ -192,6 +194,7 @@ func (h *ContentHandler) loadContentByTxid(ctx context.Context, txHash *chainhas
 				Content:     content,
 				Outpoint:    outpoint,
 				Sequence:    0,
+				Output:      output.Bytes(),
 			}
 			h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
 			return response, nil
