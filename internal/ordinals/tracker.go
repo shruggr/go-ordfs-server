@@ -354,24 +354,24 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 
 			scriptData := t.parseScript(output.LockingScript)
 
+			if len(scriptData.MapData) > 0 {
+				t.cache.ZAdd(ctx, mapKey, redis.Z{
+					Score:  float64(currentSequence),
+					Member: currentOutpoint.String(),
+				})
+				if includeMap {
+					if mergedMap == nil {
+						mergedMap = make(map[string]string)
+					}
+					for k, v := range scriptData.MapData {
+						mergedMap[k] = v
+					}
+				}
+			}
+
 			if scriptData.Content != nil {
 				contentType = scriptData.ContentType
 				content = scriptData.Content
-
-				if len(scriptData.MapData) > 0 {
-					t.cache.ZAdd(ctx, mapKey, redis.Z{
-						Score:  float64(currentSequence),
-						Member: currentOutpoint.String(),
-					})
-					if includeMap {
-						if mergedMap == nil {
-							mergedMap = make(map[string]string)
-						}
-						for k, v := range scriptData.MapData {
-							mergedMap[k] = v
-						}
-					}
-				}
 
 				if version >= 0 && currentVersion == version {
 					return &ContentResponse{
