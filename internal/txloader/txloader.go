@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/bsv-blockchain/go-sdk/chainhash"
@@ -60,6 +61,7 @@ func (t *TxLoader) LoadTx(ctx context.Context, txid string) (*transaction.Transa
 
 func (t *TxLoader) GetSpend(ctx context.Context, outpoint string) (*chainhash.Hash, error) {
 	url := fmt.Sprintf("%s/v1/txo/spend/%s", t.junglebusURL, outpoint)
+	slog.Debug("Fetching spend from JungleBus", "url", url)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -68,6 +70,7 @@ func (t *TxLoader) GetSpend(ctx context.Context, outpoint string) (*chainhash.Ha
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
+		slog.Debug("JungleBus spend lookup error", "outpoint", outpoint, "status", resp.StatusCode)
 		return nil, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
 	}
 
@@ -98,10 +101,12 @@ func (t *TxLoader) loadRemoteRawtx(ctx context.Context, txid string) ([]byte, er
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
+		slog.Debug("Transaction not found in JungleBus", "txid", txid)
 		return nil, ErrNotFound
 	}
 
 	if resp.StatusCode != 200 {
+		slog.Debug("JungleBus error", "txid", txid, "status", resp.StatusCode)
 		return nil, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
 	}
 

@@ -288,15 +288,15 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 	spendsKey := fmt.Sprintf("spends:%s", origin.String())
 	mapKey := fmt.Sprintf("map:%s", origin.String())
 
-	var targetOut *transaction.Outpoint
+	var currentOutpoint *transaction.Outpoint
 	var targetRank int64 = -1
 
-	if version >= 0 {
+	if version > 0 {
 		versionMembers := t.cache.ZRangeWithScores(ctx, versionsKey, int64(version), int64(version)).Val()
 		if len(versionMembers) > 0 {
-			targetOut, _ = transaction.OutpointFromString(versionMembers[0].Member.(string))
+			currentOutpoint, _ = transaction.OutpointFromString(versionMembers[0].Member.(string))
 			targetRank = int64(versionMembers[0].Score)
-			slog.Debug("Found cached version", "version", version, "outpoint", targetOut.String())
+			slog.Debug("Found cached version", "version", version, "outpoint", currentOutpoint.String())
 		} else {
 			slog.Debug("Version not in cache, will crawl", "version", version)
 		}
@@ -307,159 +307,138 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 		mergedMap = t.loadMergedMap(ctx, origin, targetRank)
 	}
 
-	if targetOut != nil {
-		tx, err := t.txLoader.LoadTx(ctx, targetOut.Txid.String())
-		if err != nil {
-			return nil, fmt.Errorf("failed to load tx: %w", err)
-		}
-
-		if int(targetOut.Index) >= len(tx.Outputs) {
-			return nil, fmt.Errorf("invalid outpoint index")
-		}
-
-		output := tx.Outputs[targetOut.Index]
-
-		scriptData := t.parseScript(output.LockingScript)
-
-		return &ResolveResult{
-			Outpoint:    targetOut,
-			ContentType: scriptData.ContentType,
-			Content:     scriptData.Content,
-			MergedMap:   mergedMap,
-		}, nil
-	}
-
-	var currentOutpoint *transaction.Outpoint
-	var currentSequence int64 = -1
-
-	lastSpendMembers := t.cache.ZRevRangeWithScores(ctx, spendsKey, 0, 0).Val()
-	if len(lastSpendMembers) > 0 {
-		currentSequence = int64(lastSpendMembers[0].Score)
-		currentOutpoint, _ = transaction.OutpointFromString(lastSpendMembers[0].Member.(string))
-	}
-
 	if currentOutpoint == nil {
-		currentOutpoint = origin
-		currentSequence = -1
-	}
+		var currentSequence int64 = -1
 
-	var contentType string
-	var content []byte
-	currentVersionCount := t.cache.ZCard(ctx, versionsKey).Val()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
+		lastSpendMembers := t.cache.ZRevRangeWithScores(ctx, spendsKey, 0, 0).Val()
+		if len(lastSpendMembers) > 0 {
+			currentSequence = int64(lastSpendMembers[0].Score)
+			currentOutpoint, _ = transaction.OutpointFromString(lastSpendMembers[0].Member.(string))
 		}
 
-		currentSequence++
-
-		slog.Debug("Crawling",
-			"sequence", currentSequence,
-			"outpoint", currentOutpoint.String())
-
-		tx, err := t.txLoader.LoadTx(ctx, currentOutpoint.Txid.String())
-		if err != nil {
-			return nil, fmt.Errorf("failed to load tx: %w", err)
+		if currentOutpoint == nil {
+			currentOutpoint = origin
+			currentSequence = -1
 		}
 
-		if int(currentOutpoint.Index) >= len(tx.Outputs) {
-			return nil, fmt.Errorf("invalid outpoint index")
-		}
+		var contentType string
+		var content []byte
+		currentVersionCount := t.cache.ZCard(ctx, versionsKey).Val()
 
-		output := tx.Outputs[currentOutpoint.Index]
+		for {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
 
-		scriptData := t.parseScript(output.LockingScript)
+			currentSequence++
 
-		if scriptData.Content != nil {
-			contentType = scriptData.ContentType
-			content = scriptData.Content
+			slog.Debug("Crawling",
+				"sequence", currentSequence,
+				"outpoint", currentOutpoint.String())
 
-			if len(scriptData.MapData) > 0 {
-				t.cache.ZAdd(ctx, mapKey, redis.Z{
-					Score:  float64(currentSequence),
-					Member: currentOutpoint.String(),
-				})
+			tx, err := t.txLoader.LoadTx(ctx, currentOutpoint.Txid.String())
+			if err != nil {
+				return nil, fmt.Errorf("failed to load tx: %w", err)
+			}
+
+			if int(currentOutpoint.Index) >= len(tx.Outputs) {
+				return nil, fmt.Errorf("invalid outpoint index")
+			}
+
+			output := tx.Outputs[currentOutpoint.Index]
+
+			scriptData := t.parseScript(output.LockingScript)
+
+			if scriptData.Content != nil {
+				contentType = scriptData.ContentType
+				content = scriptData.Content
+
+				if len(scriptData.MapData) > 0 {
+					t.cache.ZAdd(ctx, mapKey, redis.Z{
+						Score:  float64(currentSequence),
+						Member: currentOutpoint.String(),
+					})
+					if includeMap {
+						if mergedMap == nil {
+							mergedMap = make(map[string]string)
+						}
+						for k, v := range scriptData.MapData {
+							mergedMap[k] = v
+						}
+					}
+				}
+
+				if version >= 0 && currentVersionCount == int64(version) {
+					return &ResolveResult{
+						Outpoint:    currentOutpoint,
+						ContentType: contentType,
+						Content:     content,
+						MergedMap:   mergedMap,
+					}, nil
+				}
+
+				if currentSequence > 0 {
+					t.cache.ZAdd(ctx, versionsKey, redis.Z{
+						Score:  float64(currentSequence),
+						Member: currentOutpoint.String(),
+					})
+				}
+				currentVersionCount++
+			} else if currentSequence == 0 {
+				return nil, fmt.Errorf("no inscription found at origin")
+			}
+
+			nextOutpoint, err := t.ResolveSpend(ctx, currentOutpoint)
+			if err != nil {
+				return nil, err
+			}
+
+			if nextOutpoint == nil {
+				if version == -1 {
+					return &ResolveResult{
+						Outpoint:    currentOutpoint,
+						ContentType: contentType,
+						Content:     content,
+						MergedMap:   mergedMap,
+					}, nil
+				}
+				return nil, fmt.Errorf("version %d not found (reached end at version %d): %w", version, currentVersionCount, txloader.ErrNotFound)
+			}
+
+			t.cache.ZAdd(ctx, spendsKey, redis.Z{
+				Score:  float64(currentSequence),
+				Member: currentOutpoint.String(),
+			})
+
+			mergedOutpoint, mergedSequence, foundTarget, err := t.mergeExistingChain(ctx, origin, nextOutpoint, currentSequence, version, currentVersionCount)
+			if err != nil {
+				return nil, fmt.Errorf("failed to merge existing chain: %w", err)
+			}
+
+			if mergedOutpoint != nextOutpoint {
 				if includeMap {
-					if mergedMap == nil {
+					chainMapData := t.loadMergedMap(ctx, nextOutpoint, mergedSequence-currentSequence-1)
+					if mergedMap == nil && len(chainMapData) > 0 {
 						mergedMap = make(map[string]string)
 					}
-					for k, v := range scriptData.MapData {
+					for k, v := range chainMapData {
 						mergedMap[k] = v
 					}
 				}
-			}
 
-			if version >= 0 && currentVersionCount == int64(version) {
-				return &ResolveResult{
-					Outpoint:    currentOutpoint,
-					ContentType: contentType,
-					Content:     content,
-					MergedMap:   mergedMap,
-				}, nil
-			}
-
-			if currentSequence > 0 {
-				t.cache.ZAdd(ctx, versionsKey, redis.Z{
-					Score:  float64(currentSequence),
-					Member: currentOutpoint.String(),
-				})
-			}
-			currentVersionCount++
-		} else if currentSequence == 0 {
-			return nil, fmt.Errorf("no inscription found at origin")
-		}
-
-		nextOutpoint, err := t.ResolveSpend(ctx, currentOutpoint)
-		if err != nil {
-			return nil, err
-		}
-
-		if nextOutpoint == nil {
-			if version == -1 {
-				return &ResolveResult{
-					Outpoint:    currentOutpoint,
-					ContentType: contentType,
-					Content:     content,
-					MergedMap:   mergedMap,
-				}, nil
-			}
-			return nil, fmt.Errorf("version %d not found (reached end at version %d): %w", version, currentVersionCount, txloader.ErrNotFound)
-		}
-
-		t.cache.ZAdd(ctx, spendsKey, redis.Z{
-			Score:  float64(currentSequence),
-			Member: currentOutpoint.String(),
-		})
-
-		mergedOutpoint, mergedSequence, foundTarget, err := t.mergeExistingChain(ctx, origin, nextOutpoint, currentSequence, version, currentVersionCount)
-		if err != nil {
-			return nil, fmt.Errorf("failed to merge existing chain: %w", err)
-		}
-
-		if mergedOutpoint != nextOutpoint {
-			if includeMap {
-				chainMapData := t.loadMergedMap(ctx, nextOutpoint, mergedSequence-currentSequence-1)
-				if mergedMap == nil && len(chainMapData) > 0 {
-					mergedMap = make(map[string]string)
+				if foundTarget {
+					currentOutpoint = mergedOutpoint
+					currentSequence = mergedSequence
+					break
 				}
-				for k, v := range chainMapData {
-					mergedMap[k] = v
-				}
-			}
 
-			if foundTarget {
 				currentOutpoint = mergedOutpoint
 				currentSequence = mergedSequence
-				break
+			} else {
+				currentOutpoint = nextOutpoint
 			}
-
-			currentOutpoint = mergedOutpoint
-			currentSequence = mergedSequence
-		} else {
-			currentOutpoint = nextOutpoint
 		}
 	}
 
