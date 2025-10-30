@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,6 +101,10 @@ func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.Conten
 		if mapJSON, err := json.Marshal(resp.MergedMap); err == nil {
 			c.Set("X-Map", string(mapJSON))
 		}
+	}
+
+	if c.QueryBool("out", false) && len(resp.Output) > 0 {
+		c.Set("X-Output", base64.StdEncoding.EncodeToString(resp.Output))
 	}
 
 	return c.Send(resp.Content)

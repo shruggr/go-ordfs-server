@@ -237,6 +237,7 @@ type ContentResponse struct {
 	Content     []byte
 	MergedMap   map[string]string
 	Sequence    int
+	Output      []byte
 }
 
 func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, maxScore int64) map[string]string {
@@ -380,6 +381,7 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 						Content:     content,
 						MergedMap:   mergedMap,
 						Sequence:    currentVersion,
+						Output:      output.Bytes(),
 					}, nil
 				}
 
@@ -410,6 +412,7 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 						Content:     content,
 						MergedMap:   mergedMap,
 						Sequence:    currentVersion,
+						Output:      output.Bytes(),
 					}, nil
 				}
 				return nil, fmt.Errorf("version %d not found (reached end at version %d): %w", version, currentVersion, txloader.ErrNotFound)
@@ -459,7 +462,8 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 		return nil, fmt.Errorf("invalid outpoint index")
 	}
 
-	scriptData := t.parseScript(tx.Outputs[currentOutpoint.Index].LockingScript)
+	output := tx.Outputs[currentOutpoint.Index]
+	scriptData := t.parseScript(output.LockingScript)
 
 	return &ContentResponse{
 		Outpoint:    currentOutpoint,
@@ -467,5 +471,6 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 		Content:     scriptData.Content,
 		MergedMap:   mergedMap,
 		Sequence:    currentVersion,
+		Output:      output.Bytes(),
 	}, nil
 }
