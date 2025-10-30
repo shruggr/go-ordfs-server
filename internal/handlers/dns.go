@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/shruggr/go-ordfs-server/internal/cache"
+	"github.com/shruggr/go-ordfs-server/internal/ordinals"
 	"github.com/shruggr/go-ordfs-server/internal/txloader"
 )
 
@@ -167,7 +168,7 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		})
 	}
 
-	var resp *ContentResponse
+	var resp *ordinals.ContentResponse
 	var err error
 
 	if len(fileOrPointer) == 64 {

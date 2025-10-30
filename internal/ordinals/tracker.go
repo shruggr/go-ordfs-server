@@ -102,7 +102,7 @@ func (t *Tracker) calculateOrdinalOutput(ctx context.Context, spendTx *transacti
 	return nil, fmt.Errorf("ordinal output not found (no 1-sat output at ordinal offset)")
 }
 
-func (t *Tracker) mergeExistingChain(ctx context.Context, origin *transaction.Outpoint, intersectionOutpoint *transaction.Outpoint, currentSequence int64, targetVersion int, currentVersionCount int64) (*transaction.Outpoint, int64, bool, error) {
+func (t *Tracker) mergeExistingChain(ctx context.Context, origin *transaction.Outpoint, intersectionOutpoint *transaction.Outpoint, currentSequence int64, targetVersion int, currentVersion int) (*transaction.Outpoint, int64, bool, error) {
 	intersectionSpendsKey := fmt.Sprintf("spends:%s", intersectionOutpoint.String())
 	existingSpends := t.cache.ZRangeWithScores(ctx, intersectionSpendsKey, 0, -1).Val()
 
@@ -143,8 +143,8 @@ func (t *Tracker) mergeExistingChain(ctx context.Context, origin *transaction.Ou
 		})
 
 		if targetVersion >= 0 {
-			newVersionCount := currentVersionCount + int64(i) + 1
-			if newVersionCount == int64(targetVersion) {
+			newVersionCount := currentVersion + i + 1
+			if newVersionCount == targetVersion {
 				targetOutpoint, _ = transaction.OutpointFromString(outpointStr)
 				targetScore = newScore
 				foundTarget = true
@@ -231,11 +231,12 @@ func (t *Tracker) parseScript(lockingScript *script.Script) *ScriptData {
 	return result
 }
 
-type ResolveResult struct {
+type ContentResponse struct {
 	Outpoint    *transaction.Outpoint
 	ContentType string
 	Content     []byte
 	MergedMap   map[string]string
+	Sequence    int
 }
 
 func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, maxScore int64) map[string]string {
@@ -278,7 +279,7 @@ func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoin
 	return mergedMap
 }
 
-func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, version int, targetOutpoint *transaction.Outpoint, includeMap bool) (*ResolveResult, error) {
+func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, version int, targetOutpoint *transaction.Outpoint, includeMap bool) (*ContentResponse, error) {
 	slog.Debug("Resolve started",
 		"origin", origin.String(),
 		"version", version,
@@ -290,12 +291,14 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 
 	var currentOutpoint *transaction.Outpoint
 	var targetRank int64 = -1
+	var currentVersion int
 
 	if version > 0 {
 		versionMembers := t.cache.ZRangeWithScores(ctx, versionsKey, int64(version), int64(version)).Val()
 		if len(versionMembers) > 0 {
 			currentOutpoint, _ = transaction.OutpointFromString(versionMembers[0].Member.(string))
 			targetRank = int64(versionMembers[0].Score)
+			currentVersion = version
 			slog.Debug("Found cached version", "version", version, "outpoint", currentOutpoint.String())
 		} else {
 			slog.Debug("Version not in cache, will crawl", "version", version)
@@ -323,7 +326,7 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 
 		var contentType string
 		var content []byte
-		currentVersionCount := t.cache.ZCard(ctx, versionsKey).Val()
+		currentVersion := int(t.cache.ZCard(ctx, versionsKey).Val())
 
 		for {
 			select {
@@ -370,12 +373,13 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 					}
 				}
 
-				if version >= 0 && currentVersionCount == int64(version) {
-					return &ResolveResult{
+				if version >= 0 && currentVersion == version {
+					return &ContentResponse{
 						Outpoint:    currentOutpoint,
 						ContentType: contentType,
 						Content:     content,
 						MergedMap:   mergedMap,
+						Sequence:    currentVersion,
 					}, nil
 				}
 
@@ -384,8 +388,8 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 						Score:  float64(currentSequence),
 						Member: currentOutpoint.String(),
 					})
+					currentVersion++
 				}
-				currentVersionCount++
 			} else if currentSequence == 0 {
 				return nil, fmt.Errorf("no inscription found at origin")
 			}
@@ -397,14 +401,18 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 
 			if nextOutpoint == nil {
 				if version == -1 {
-					return &ResolveResult{
+					if content == nil {
+						return nil, fmt.Errorf("no content found in chain: %w", txloader.ErrNotFound)
+					}
+					return &ContentResponse{
 						Outpoint:    currentOutpoint,
 						ContentType: contentType,
 						Content:     content,
 						MergedMap:   mergedMap,
+						Sequence:    currentVersion,
 					}, nil
 				}
-				return nil, fmt.Errorf("version %d not found (reached end at version %d): %w", version, currentVersionCount, txloader.ErrNotFound)
+				return nil, fmt.Errorf("version %d not found (reached end at version %d): %w", version, currentVersion, txloader.ErrNotFound)
 			}
 
 			t.cache.ZAdd(ctx, spendsKey, redis.Z{
@@ -412,7 +420,7 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 				Member: currentOutpoint.String(),
 			})
 
-			mergedOutpoint, mergedSequence, foundTarget, err := t.mergeExistingChain(ctx, origin, nextOutpoint, currentSequence, version, currentVersionCount)
+			mergedOutpoint, mergedSequence, foundTarget, err := t.mergeExistingChain(ctx, origin, nextOutpoint, currentSequence, version, currentVersion)
 			if err != nil {
 				return nil, fmt.Errorf("failed to merge existing chain: %w", err)
 			}
@@ -453,10 +461,11 @@ func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, ver
 
 	scriptData := t.parseScript(tx.Outputs[currentOutpoint.Index].LockingScript)
 
-	return &ResolveResult{
+	return &ContentResponse{
 		Outpoint:    currentOutpoint,
 		ContentType: scriptData.ContentType,
 		Content:     scriptData.Content,
 		MergedMap:   mergedMap,
+		Sequence:    currentVersion,
 	}, nil
 }

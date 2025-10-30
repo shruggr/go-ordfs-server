@@ -32,13 +32,6 @@ func NewContentHandler(txLoader *txloader.TxLoader, redisCache *cache.RedisCache
 	}
 }
 
-type ContentResponse struct {
-	ContentType string
-	Content     []byte
-	Outpoint    *transaction.Outpoint
-	MergedMap   map[string]string
-}
-
 func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 	ctx := context.Background()
 	txidOrOutpoint := c.Params("txidOrOutpoint")
@@ -49,7 +42,7 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 		})
 	}
 
-	var resp *ContentResponse
+	var resp *ordinals.ContentResponse
 	var err error
 
 	if len(txidOrOutpoint) == 64 {
@@ -92,9 +85,10 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 	return h.sendContentResponse(c, resp, seq)
 }
 
-func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ContentResponse, version int) error {
+func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.ContentResponse, version int) error {
 	c.Set("Content-Type", resp.ContentType)
 	c.Set("X-Outpoint", resp.Outpoint.String())
+	c.Set("X-Seq", fmt.Sprintf("%d", resp.Sequence))
 
 	if version == -1 {
 		c.Set("Cache-Control", "public, max-age=60")
@@ -111,7 +105,7 @@ func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ContentResponse
 	return c.Send(resp.Content)
 }
 
-func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, includeMap bool) (*ContentResponse, bool) {
+func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, includeMap bool) (*ordinals.ContentResponse, bool) {
 	cached := h.cache.HGetAll(ctx, cacheKey).Val()
 	if len(cached) == 0 {
 		return nil, false
@@ -126,10 +120,17 @@ func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, 
 	}
 
 	resolvedOutpoint, _ := transaction.OutpointFromString(outpointStr)
-	response := &ContentResponse{
+
+	sequence := 0
+	if seqStr, ok := cached["sequence"]; ok {
+		fmt.Sscanf(seqStr, "%d", &sequence)
+	}
+
+	response := &ordinals.ContentResponse{
 		ContentType: contentType,
 		Content:     []byte(content),
 		Outpoint:    resolvedOutpoint,
+		Sequence:    sequence,
 	}
 
 	if includeMap {
@@ -143,11 +144,12 @@ func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, 
 	return response, true
 }
 
-func (h *ContentHandler) cacheContentResponse(ctx context.Context, cacheKey string, cacheTTL time.Duration, response *ContentResponse) {
+func (h *ContentHandler) cacheContentResponse(ctx context.Context, cacheKey string, cacheTTL time.Duration, response *ordinals.ContentResponse) {
 	cacheData := map[string]any{
 		"contentType": response.ContentType,
 		"content":     response.Content,
 		"outpoint":    response.Outpoint.String(),
+		"sequence":    fmt.Sprintf("%d", response.Sequence),
 	}
 
 	if len(response.MergedMap) > 0 {
@@ -160,7 +162,7 @@ func (h *ContentHandler) cacheContentResponse(ctx context.Context, cacheKey stri
 	h.cache.Expire(ctx, cacheKey, cacheTTL)
 }
 
-func (h *ContentHandler) loadContentByTxid(ctx context.Context, txHash *chainhash.Hash) (*ContentResponse, error) {
+func (h *ContentHandler) loadContentByTxid(ctx context.Context, txHash *chainhash.Hash) (*ordinals.ContentResponse, error) {
 	cacheKey := fmt.Sprintf("cache:%s:0", txHash.String())
 	cacheTTL := 30 * 24 * time.Hour
 
@@ -180,10 +182,11 @@ func (h *ContentHandler) loadContentByTxid(ctx context.Context, txHash *chainhas
 				Txid:  *txHash,
 				Index: uint32(i),
 			}
-			response := &ContentResponse{
+			response := &ordinals.ContentResponse{
 				ContentType: contentType,
 				Content:     content,
 				Outpoint:    outpoint,
+				Sequence:    0,
 			}
 			h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
 			return response, nil
@@ -193,7 +196,7 @@ func (h *ContentHandler) loadContentByTxid(ctx context.Context, txHash *chainhas
 	return nil, fmt.Errorf("no inscription or B protocol content found: %w", txloader.ErrNotFound)
 }
 
-func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *transaction.Outpoint, version int, includeMap bool) (*ContentResponse, error) {
+func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *transaction.Outpoint, version int, includeMap bool) (*ordinals.ContentResponse, error) {
 	var cacheKey string
 	var cacheTTL time.Duration
 
@@ -227,11 +230,12 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 		return nil, fmt.Errorf("no inscription or B protocol content found: %w", txloader.ErrNotFound)
 	}
 
-	response := &ContentResponse{
+	response := &ordinals.ContentResponse{
 		ContentType: result.ContentType,
 		Content:     result.Content,
 		Outpoint:    result.Outpoint,
 		MergedMap:   result.MergedMap,
+		Sequence:    result.Sequence,
 	}
 
 	h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)

@@ -10,6 +10,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/gofiber/fiber/v2"
+	"github.com/shruggr/go-ordfs-server/internal/ordinals"
 	"github.com/shruggr/go-ordfs-server/internal/txloader"
 )
 
@@ -34,7 +35,7 @@ func (h *DirectoryHandler) GetFile(c *fiber.Ctx) error {
 		})
 	}
 
-	var dirResp *ContentResponse
+	var dirResp *ordinals.ContentResponse
 	var err error
 
 	if len(pointer) == 64 {
@@ -82,7 +83,7 @@ func (h *DirectoryHandler) GetFile(c *fiber.Ctx) error {
 
 	filePointer = strings.TrimPrefix(filePointer, "ord://")
 
-	var fileResp *ContentResponse
+	var fileResp *ordinals.ContentResponse
 
 	if len(filePointer) == 64 {
 		txHash, parseErr := chainhash.NewHashFromHex(filePointer)
