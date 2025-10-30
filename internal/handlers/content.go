@@ -244,6 +244,7 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 		Outpoint:    result.Outpoint,
 		MergedMap:   result.MergedMap,
 		Sequence:    result.Sequence,
+		Output:      result.Output,
 	}
 
 	h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
