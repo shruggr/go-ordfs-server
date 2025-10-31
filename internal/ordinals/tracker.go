@@ -35,16 +35,17 @@ func (t *Tracker) calculateOrdinalOutput(ctx context.Context, spendTx *transacti
 			break
 		}
 
-		prevTx, err := t.txLoader.LoadTx(ctx, input.SourceTXID.String())
+		prevOutpoint := &transaction.Outpoint{
+			Txid:  *input.SourceTXID,
+			Index: input.SourceTxOutIndex,
+		}
+
+		prevOutput, err := t.txLoader.LoadOutput(ctx, prevOutpoint)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load input tx %s: %w", input.SourceTXID.String(), err)
+			return nil, fmt.Errorf("failed to load input output %s: %w", prevOutpoint.OrdinalString(), err)
 		}
 
-		if int(input.SourceTxOutIndex) >= len(prevTx.Outputs) {
-			return nil, fmt.Errorf("invalid input reference")
-		}
-
-		ordinalOffset += prevTx.Outputs[input.SourceTxOutIndex].Satoshis
+		ordinalOffset += prevOutput.Satoshis
 	}
 
 	if inputIndex == -1 {
@@ -88,47 +89,24 @@ func (t *Tracker) calculatePreviousOrdinalInput(ctx context.Context, createTx *t
 
 	var cumulativeSats uint64 = 0
 	for _, input := range createTx.Inputs {
-		prevTx, err := t.txLoader.LoadTx(ctx, input.SourceTXID.String())
+		prevOutpoint := &transaction.Outpoint{
+			Txid:  *input.SourceTXID,
+			Index: input.SourceTxOutIndex,
+		}
+
+		prevOutput, err := t.txLoader.LoadOutput(ctx, prevOutpoint)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load input tx %s: %w", input.SourceTXID.String(), err)
+			return nil, fmt.Errorf("failed to load input output %s: %w", prevOutpoint.OrdinalString(), err)
 		}
 
-		if int(input.SourceTxOutIndex) >= len(prevTx.Outputs) {
-			return nil, fmt.Errorf("invalid input reference")
+		if cumulativeSats+prevOutput.Satoshis > ordinalOffset {
+			return prevOutpoint, nil
 		}
 
-		prevOutputSats := prevTx.Outputs[input.SourceTxOutIndex].Satoshis
-
-		if cumulativeSats+prevOutputSats > ordinalOffset {
-			return &transaction.Outpoint{
-				Txid:  *input.SourceTXID,
-				Index: input.SourceTxOutIndex,
-			}, nil
-		}
-
-		cumulativeSats += prevOutputSats
+		cumulativeSats += prevOutput.Satoshis
 	}
 
 	return nil, fmt.Errorf("could not find input containing ordinal at offset %d", ordinalOffset)
-}
-
-func (t *Tracker) isTrueOrigin(ctx context.Context, createTx *transaction.Transaction, currentOutpoint *transaction.Outpoint) (bool, error) {
-	prevOutpoint, err := t.calculatePreviousOrdinalInput(ctx, createTx, currentOutpoint)
-	if err != nil {
-		return false, err
-	}
-
-	prevTx, err := t.txLoader.LoadTx(ctx, prevOutpoint.Txid.String())
-	if err != nil {
-		return false, fmt.Errorf("failed to load previous tx: %w", err)
-	}
-
-	if int(prevOutpoint.Index) >= len(prevTx.Outputs) {
-		return false, fmt.Errorf("invalid previous outpoint index")
-	}
-
-	prevOutput := prevTx.Outputs[prevOutpoint.Index]
-	return prevOutput.Satoshis != 1, nil
 }
 
 type ChainEntry struct {
@@ -181,19 +159,19 @@ func (t *Tracker) backwardCrawl(ctx context.Context, requestedOutpoint *transact
 			return nil, nil, fmt.Errorf("failed to load tx %s: %w", currentOutpoint.Txid.String(), err)
 		}
 
-		isOrigin, err := t.isTrueOrigin(ctx, currentTx, currentOutpoint)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to check if true origin: %w", err)
-		}
-
-		if isOrigin {
-			slog.Debug("Found true origin", "outpoint", currentOutpoint.OrdinalString(), "depth", -relativeSeq)
-			return currentOutpoint, chain, nil
-		}
-
 		prevOutpoint, err := t.calculatePreviousOrdinalInput(ctx, currentTx, currentOutpoint)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to calculate previous input: %w", err)
+		}
+
+		prevOutput, err := t.txLoader.LoadOutput(ctx, prevOutpoint)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load previous output: %w", err)
+		}
+
+		if prevOutput.Satoshis != 1 {
+			slog.Debug("Found true origin", "outpoint", currentOutpoint.OrdinalString(), "depth", -relativeSeq)
+			return currentOutpoint, chain, nil
 		}
 
 		knownOrigin := t.cache.HGet(ctx, "origins", prevOutpoint.OrdinalString()).Val()
