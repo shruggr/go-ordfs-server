@@ -89,7 +89,10 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.ContentResponse, seq int) error {
 	c.Set("Content-Type", resp.ContentType)
 	c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
-	c.Set("X-Origin", resp.Origin.OrdinalString())
+
+	if resp.Origin != nil {
+		c.Set("X-Origin", resp.Origin.OrdinalString())
+	}
 	c.Set("X-Ord-Seq", fmt.Sprintf("%d", resp.Sequence))
 
 	if seq == -1 {
@@ -266,6 +269,22 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 
 	h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
 	return response, nil
+}
+
+func (h *ContentHandler) HandleAll(c *fiber.Ctx) error {
+	ctx := context.Background()
+
+	// Parse the path: /content/pointer[:seq][/file/path]
+	parsed, err := parsePointerPath(c.Path(), "/content")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("invalid path: %v", err),
+		})
+	}
+
+	// Use DirectoryResolver to handle both direct content and directory resolution
+	resolver := NewDirectoryResolver(h)
+	return resolver.Resolve(ctx, c, parsed.Pointer, parsed.Seq, parsed.FilePath)
 }
 
 func (h *ContentHandler) extractContent(output *transaction.TransactionOutput) (contentType string, content []byte) {

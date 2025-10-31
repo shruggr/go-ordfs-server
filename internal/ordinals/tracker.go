@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/bitcoin-sv/go-templates/template/bitcom"
 	"github.com/bitcoin-sv/go-templates/template/inscription"
@@ -11,6 +12,13 @@ import (
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/redis/go-redis/v9"
 	"github.com/shruggr/go-ordfs-server/internal/txloader"
+)
+
+const (
+	lockTTL             = 15 * time.Second
+	lockRefreshInterval = 5 * time.Second
+	lockCheckInterval   = 10 * time.Second
+	resolveTimeout      = 60 * time.Second
 )
 
 type Tracker struct {
@@ -22,6 +30,81 @@ func NewTracker(txLoader *txloader.TxLoader, cache *redis.Client) *Tracker {
 	return &Tracker{
 		txLoader: txLoader,
 		cache:    cache,
+	}
+}
+
+func (t *Tracker) lockKey(outpoint *transaction.Outpoint) string {
+	return fmt.Sprintf("lock:%s", outpoint.OrdinalString())
+}
+
+func (t *Tracker) channelKey(outpoint *transaction.Outpoint) string {
+	return fmt.Sprintf("channel:%s", outpoint.OrdinalString())
+}
+
+func (t *Tracker) setLock(ctx context.Context, outpoint *transaction.Outpoint) error {
+	return t.cache.SetNX(ctx, t.lockKey(outpoint), "1", lockTTL).Err()
+}
+
+func (t *Tracker) releaseLock(outpoint *transaction.Outpoint) {
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := t.cache.Del(timeoutCtx, t.lockKey(outpoint)).Err(); err != nil {
+		slog.Debug("Failed to release lock", "outpoint", outpoint.OrdinalString(), "error", err)
+	}
+}
+
+func (t *Tracker) publishCrawlComplete(outpoints []*transaction.Outpoint, origin string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, outpoint := range outpoints {
+		if err := t.cache.Publish(ctx, t.channelKey(outpoint), origin).Err(); err != nil {
+			slog.Debug("Failed to publish completion", "outpoint", outpoint.OrdinalString(), "error", err)
+		}
+	}
+}
+
+func (t *Tracker) publishCrawlFailure(outpoints []*transaction.Outpoint) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, outpoint := range outpoints {
+		if err := t.cache.Publish(ctx, t.channelKey(outpoint), "").Err(); err != nil {
+			slog.Debug("Failed to publish failure", "outpoint", outpoint.OrdinalString(), "error", err)
+		}
+	}
+}
+
+func (t *Tracker) waitForCrawl(ctx context.Context, outpoint *transaction.Outpoint) error {
+	pubsub := t.cache.Subscribe(ctx, t.channelKey(outpoint))
+	defer pubsub.Close()
+
+	ch := pubsub.Channel()
+	ticker := time.NewTicker(lockCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case msg := <-ch:
+			if msg.Payload != "" {
+				slog.Debug("Received pub/sub message", "outpoint", outpoint.OrdinalString(), "origin", msg.Payload)
+				return nil
+			}
+			slog.Debug("Received failure message from pub/sub", "outpoint", outpoint.OrdinalString())
+			return fmt.Errorf("other crawl failed")
+		case <-ticker.C:
+			exists, err := t.cache.Exists(ctx, t.lockKey(outpoint)).Result()
+			if err != nil {
+				return fmt.Errorf("failed to check lock: %w", err)
+			}
+			if exists == 0 {
+				slog.Debug("Lock cleared during wait", "outpoint", outpoint.OrdinalString())
+				return nil
+			}
+		}
 	}
 }
 
@@ -58,13 +141,20 @@ func (t *Tracker) calculateOrdinalOutput(ctx context.Context, spendTx *transacti
 			continue
 		}
 
-		if cumulativeSats == ordinalOffset && output.Satoshis == 1 {
+		if cumulativeSats == ordinalOffset {
+			if output.Satoshis != 1 {
+				return nil, nil
+			}
 			return &transaction.Outpoint{
 				Txid:  *spendTx.TxID(),
 				Index: uint32(i),
 			}, nil
 		}
+
 		cumulativeSats += output.Satoshis
+		if cumulativeSats > ordinalOffset {
+			break
+		}
 	}
 
 	return nil, fmt.Errorf("ordinal output not found (no 1-sat output at ordinal offset)")
@@ -99,11 +189,17 @@ func (t *Tracker) calculatePreviousOrdinalInput(ctx context.Context, createTx *t
 			return nil, fmt.Errorf("failed to load input output %s: %w", prevOutpoint.OrdinalString(), err)
 		}
 
-		if cumulativeSats+prevOutput.Satoshis > ordinalOffset {
+		if cumulativeSats == ordinalOffset {
+			if prevOutput.Satoshis != 1 {
+				return nil, nil
+			}
 			return prevOutpoint, nil
 		}
 
 		cumulativeSats += prevOutput.Satoshis
+		if cumulativeSats > ordinalOffset {
+			break
+		}
 	}
 
 	return nil, fmt.Errorf("could not find input containing ordinal at offset %d", ordinalOffset)
@@ -130,14 +226,64 @@ func (t *Tracker) saveBackwardProgress(ctx context.Context, requestedOutpoint *t
 	slog.Debug("Saved backward progress", "key", spendsKey, "count", len(chain))
 }
 
-func (t *Tracker) backwardCrawl(ctx context.Context, requestedOutpoint *transaction.Outpoint) (*transaction.Outpoint, []ChainEntry, error) {
+func (t *Tracker) backwardCrawl(ctx context.Context, requestedOutpoint *transaction.Outpoint) (*transaction.Outpoint, error) {
+	if err := t.setLock(ctx, requestedOutpoint); err != nil {
+		slog.Debug("Lock already held, waiting for crawl to complete", "outpoint", requestedOutpoint.OrdinalString())
+		if err := t.waitForCrawl(ctx, requestedOutpoint); err != nil {
+			return nil, err
+		}
+
+		originStr := t.cache.HGet(ctx, "origins", requestedOutpoint.OrdinalString()).Val()
+		if originStr != "" {
+			origin, err := transaction.OutpointFromString(originStr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse origin after wait: %w", err)
+			}
+			slog.Debug("Using origin from completed crawl", "origin", origin.OrdinalString())
+			return origin, nil
+		}
+
+		slog.Debug("No origin found after wait, attempting crawl", "outpoint", requestedOutpoint.OrdinalString())
+		if err := t.setLock(ctx, requestedOutpoint); err != nil {
+			return nil, fmt.Errorf("failed to acquire lock after wait: %w", err)
+		}
+	}
+
+	lockedOutpoints := []*transaction.Outpoint{requestedOutpoint}
+	defer func() {
+		for _, outpoint := range lockedOutpoints {
+			t.releaseLock(outpoint)
+		}
+	}()
+
+	crawlCtx, cancelCrawl := context.WithCancel(ctx)
+	defer cancelCrawl()
+
+	go func() {
+		ticker := time.NewTicker(lockRefreshInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-crawlCtx.Done():
+				return
+			case <-ticker.C:
+				for _, outpoint := range lockedOutpoints {
+					if err := t.cache.Set(crawlCtx, t.lockKey(outpoint), "1", lockTTL).Err(); err != nil {
+						slog.Debug("Failed to refresh lock", "outpoint", outpoint.OrdinalString(), "error", err)
+					}
+				}
+			}
+		}
+	}()
+
 	requestedTx, err := t.txLoader.LoadTx(ctx, requestedOutpoint.Txid.String())
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load requested tx: %w", err)
+		return nil, fmt.Errorf("failed to load requested tx: %w", err)
 	}
 
 	if int(requestedOutpoint.Index) >= len(requestedTx.Outputs) {
-		return nil, nil, fmt.Errorf("invalid outpoint index")
+		return nil, fmt.Errorf("invalid outpoint index")
 	}
 
 	requestedScriptData := t.parseScript(requestedTx.Outputs[requestedOutpoint.Index].LockingScript)
@@ -150,47 +296,81 @@ func (t *Tracker) backwardCrawl(ctx context.Context, requestedOutpoint *transact
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 
 		currentTx, err := t.txLoader.LoadTx(ctx, currentOutpoint.Txid.String())
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to load tx %s: %w", currentOutpoint.Txid.String(), err)
+			return nil, fmt.Errorf("failed to load tx %s: %w", currentOutpoint.Txid.String(), err)
 		}
 
 		prevOutpoint, err := t.calculatePreviousOrdinalInput(ctx, currentTx, currentOutpoint)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate previous input: %w", err)
+			return nil, fmt.Errorf("failed to calculate previous input: %w", err)
 		}
 
-		prevOutput, err := t.txLoader.LoadOutput(ctx, prevOutpoint)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to load previous output: %w", err)
-		}
-
-		if prevOutput.Satoshis != 1 {
-			slog.Debug("Found true origin", "outpoint", currentOutpoint.OrdinalString(), "depth", -relativeSeq)
-			return currentOutpoint, chain, nil
+		if prevOutpoint == nil {
+			slog.Debug("Found origin", "outpoint", currentOutpoint.OrdinalString(), "depth", -relativeSeq)
+			if err := t.migrateToOrigin(ctx, requestedOutpoint, currentOutpoint, chain); err != nil {
+				t.publishCrawlFailure(lockedOutpoints)
+				return nil, fmt.Errorf("migration failed: %w", err)
+			}
+			t.publishCrawlComplete(lockedOutpoints, currentOutpoint.OrdinalString())
+			return currentOutpoint, nil
 		}
 
 		knownOrigin := t.cache.HGet(ctx, "origins", prevOutpoint.OrdinalString()).Val()
 		if knownOrigin != "" {
 			slog.Debug("Found intersection with known chain", "prevOutpoint", prevOutpoint.OrdinalString(), "knownOrigin", knownOrigin)
-			trueOrigin, err := transaction.OutpointFromString(knownOrigin)
+			origin, err := transaction.OutpointFromString(knownOrigin)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to parse known origin: %w", err)
+				return nil, fmt.Errorf("failed to parse known origin: %w", err)
 			}
-			return trueOrigin, chain, nil
+			if err := t.migrateToOrigin(ctx, requestedOutpoint, origin, chain); err != nil {
+				t.publishCrawlFailure(lockedOutpoints)
+				return nil, fmt.Errorf("migration failed: %w", err)
+			}
+			t.publishCrawlComplete(lockedOutpoints, origin.OrdinalString())
+			return origin, nil
 		}
+
+		if err := t.setLock(ctx, prevOutpoint); err != nil {
+			slog.Debug("Found lock on prevOutpoint, waiting for other crawl", "prevOutpoint", prevOutpoint.OrdinalString())
+			if err := t.waitForCrawl(ctx, prevOutpoint); err != nil {
+				return nil, err
+			}
+
+			knownOrigin = t.cache.HGet(ctx, "origins", prevOutpoint.OrdinalString()).Val()
+			if knownOrigin != "" {
+				origin, err := transaction.OutpointFromString(knownOrigin)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse origin after wait: %w", err)
+				}
+				slog.Debug("Using origin from completed crawl", "origin", origin.OrdinalString())
+				if err := t.migrateToOrigin(ctx, requestedOutpoint, origin, chain); err != nil {
+					t.publishCrawlFailure(lockedOutpoints)
+					return nil, fmt.Errorf("migration failed: %w", err)
+				}
+				t.publishCrawlComplete(lockedOutpoints, origin.OrdinalString())
+				return origin, nil
+			}
+
+			slog.Debug("No origin found after wait, attempting to acquire lock", "prevOutpoint", prevOutpoint.OrdinalString())
+			if err := t.setLock(ctx, prevOutpoint); err != nil {
+				return nil, fmt.Errorf("failed to acquire lock on prevOutpoint after wait: %w", err)
+			}
+		}
+
+		lockedOutpoints = append(lockedOutpoints, prevOutpoint)
 
 		prevTx, err := t.txLoader.LoadTx(ctx, prevOutpoint.Txid.String())
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to load previous tx: %w", err)
+			return nil, fmt.Errorf("failed to load previous tx: %w", err)
 		}
 
 		if int(prevOutpoint.Index) >= len(prevTx.Outputs) {
-			return nil, nil, fmt.Errorf("invalid previous outpoint index")
+			return nil, fmt.Errorf("invalid previous outpoint index")
 		}
 
 		prevScriptData := t.parseScript(prevTx.Outputs[prevOutpoint.Index].LockingScript)
@@ -207,20 +387,30 @@ func (t *Tracker) backwardCrawl(ctx context.Context, requestedOutpoint *transact
 	}
 }
 
-func (t *Tracker) migrateToTrueOrigin(ctx context.Context, requestedOutpoint, trueOrigin *transaction.Outpoint, chain []ChainEntry) error {
+func (t *Tracker) migrateToOrigin(ctx context.Context, requestedOutpoint, origin *transaction.Outpoint, chain []ChainEntry) error {
+	// Add origin to chain unless requestedOutpoint is the origin
+	if *requestedOutpoint != *origin {
+		lastRelativeSeq := chain[len(chain)-1].RelativeSeq
+		chain = append(chain, ChainEntry{
+			Outpoint:    origin,
+			RelativeSeq: lastRelativeSeq - 1,
+			ScriptData:  nil,
+		})
+	}
+
 	offset := -chain[len(chain)-1].RelativeSeq
 
-	slog.Debug("Migrating to true origin",
+	slog.Debug("Migrating to origin",
 		"requestedOutpoint", requestedOutpoint.OrdinalString(),
-		"trueOrigin", trueOrigin.OrdinalString(),
+		"origin", origin.OrdinalString(),
 		"offset", offset,
 		"chainLength", len(chain))
 
 	pipe := t.cache.Pipeline()
 
-	originSpendsKey := fmt.Sprintf("seq:%s", trueOrigin.OrdinalString())
-	originVersionsKey := fmt.Sprintf("rev:%s", trueOrigin.OrdinalString())
-	originMapKey := fmt.Sprintf("map:%s", trueOrigin.OrdinalString())
+	originSpendsKey := fmt.Sprintf("seq:%s", origin.OrdinalString())
+	originVersionsKey := fmt.Sprintf("rev:%s", origin.OrdinalString())
+	originMapKey := fmt.Sprintf("map:%s", origin.OrdinalString())
 
 	members := make([]redis.Z, len(chain))
 	originUpdates := make(map[string]interface{})
@@ -231,7 +421,7 @@ func (t *Tracker) migrateToTrueOrigin(ctx context.Context, requestedOutpoint, tr
 			Score:  float64(absoluteSeq),
 			Member: entry.Outpoint.OrdinalString(),
 		}
-		originUpdates[entry.Outpoint.OrdinalString()] = trueOrigin.OrdinalString()
+		originUpdates[entry.Outpoint.OrdinalString()] = origin.OrdinalString()
 
 		if entry.ScriptData != nil {
 			if entry.ScriptData.Content != nil {
@@ -253,7 +443,7 @@ func (t *Tracker) migrateToTrueOrigin(ctx context.Context, requestedOutpoint, tr
 	pipe.ZAdd(ctx, originSpendsKey, members...)
 	pipe.HSet(ctx, "origins", originUpdates)
 
-	if requestedOutpoint.OrdinalString() != trueOrigin.OrdinalString() {
+	if requestedOutpoint.OrdinalString() != origin.OrdinalString() {
 		tempSpendsKey := fmt.Sprintf("seq:%s", requestedOutpoint.OrdinalString())
 		pipe.Del(ctx, tempSpendsKey)
 	}
@@ -263,7 +453,7 @@ func (t *Tracker) migrateToTrueOrigin(ctx context.Context, requestedOutpoint, tr
 		return fmt.Errorf("failed to execute migration pipeline: %w", err)
 	}
 
-	slog.Debug("Migration complete", "trueOrigin", trueOrigin.OrdinalString())
+	slog.Debug("Migration complete", "origin", origin.OrdinalString())
 	return nil
 }
 
@@ -368,6 +558,9 @@ func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoin
 }
 
 func (t *Tracker) Resolve(ctx context.Context, requestedOutpoint *transaction.Outpoint, seq int, includeMap bool) (*ContentResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+	defer cancel()
+
 	slog.Debug("Resolve started",
 		"requestedOutpoint", requestedOutpoint.OrdinalString(),
 		"seq", seq,
@@ -384,16 +577,11 @@ func (t *Tracker) Resolve(ctx context.Context, requestedOutpoint *transaction.Ou
 		}
 		slog.Debug("Found known origin", "origin", origin.OrdinalString())
 	} else {
-		trueOrigin, chain, err := t.backwardCrawl(ctx, requestedOutpoint)
+		var err error
+		origin, err = t.backwardCrawl(ctx, requestedOutpoint)
 		if err != nil {
 			return nil, fmt.Errorf("backward crawl failed: %w", err)
 		}
-
-		if err := t.migrateToTrueOrigin(ctx, requestedOutpoint, trueOrigin, chain); err != nil {
-			return nil, fmt.Errorf("migration failed: %w", err)
-		}
-
-		origin = trueOrigin
 	}
 
 	requestedSeqScore := t.cache.ZScore(ctx, fmt.Sprintf("seq:%s", origin.OrdinalString()), requestedOutpoint.OrdinalString()).Val()

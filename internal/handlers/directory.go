@@ -114,7 +114,5 @@ func (h *DirectoryHandler) GetFile(c *fiber.Ctx) error {
 		})
 	}
 
-	c.Set("Content-Type", fileResp.ContentType)
-	c.Set("X-Outpoint", fileResp.Outpoint.OrdinalString())
-	return c.Send(fileResp.Content)
+	return h.contentHandler.sendContentResponse(c, fileResp, -1)
 }

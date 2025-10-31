@@ -6,7 +6,7 @@ import (
 	"github.com/shruggr/go-ordfs-server/internal/handlers"
 )
 
-func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockHandler *handlers.BlockHandler, txHandler *handlers.TxHandler, directoryHandler *handlers.DirectoryHandler, dnsHandler *handlers.DNSHandler, frontendHandler *handlers.FrontendHandler) {
+func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockHandler *handlers.BlockHandler, txHandler *handlers.TxHandler, dnsHandler *handlers.DNSHandler, frontendHandler *handlers.FrontendHandler) {
 	app.Static("/docs", "./docs")
 	app.Static("/public", "./frontend/public")
 
@@ -28,12 +28,8 @@ func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockH
 	app.Get("/block/hash/:hash", blockHandler.GetByHash)
 	app.Get("/tx/:txid", txHandler.GetRawTx)
 
-	app.Get("/content/:txidOrOutpoint", contentHandler.GetContent)
-	app.Get("/content/:pointer/:filename", directoryHandler.GetFile)
-
 	app.Get("/preview/:b64HtmlData", frontendHandler.RenderPreview)
 
-	app.Get("/", dnsHandler.GetRoot)
-	app.Get("/:fileOrPointer", dnsHandler.GetFileOrPointer)
-	app.Get("/:pointer/:filename", directoryHandler.GetFile)
+	app.Get("/content/*", contentHandler.HandleAll)
+	app.Get("/*", dnsHandler.HandleAll)
 }

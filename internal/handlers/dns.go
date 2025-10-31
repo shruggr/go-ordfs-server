@@ -20,22 +20,20 @@ import (
 )
 
 type DNSHandler struct {
-	contentHandler   *ContentHandler
-	directoryHandler *DirectoryHandler
-	frontendHandler  *FrontendHandler
-	cache            *redis.Client
-	ordfsHost        string
-	ordfsEnabled     bool
+	contentHandler  *ContentHandler
+	frontendHandler *FrontendHandler
+	cache           *redis.Client
+	ordfsHost       string
+	ordfsEnabled    bool
 }
 
-func NewDNSHandler(contentHandler *ContentHandler, directoryHandler *DirectoryHandler, frontendHandler *FrontendHandler, redisCache *cache.RedisCache, ordfsHost string) *DNSHandler {
+func NewDNSHandler(contentHandler *ContentHandler, frontendHandler *FrontendHandler, redisCache *cache.RedisCache, ordfsHost string) *DNSHandler {
 	return &DNSHandler{
-		contentHandler:   contentHandler,
-		directoryHandler: directoryHandler,
-		frontendHandler:  frontendHandler,
-		cache:            redisCache.Client(),
-		ordfsHost:        ordfsHost,
-		ordfsEnabled:     ordfsHost != "",
+		contentHandler:  contentHandler,
+		frontendHandler: frontendHandler,
+		cache:           redisCache.Client(),
+		ordfsHost:       ordfsHost,
+		ordfsEnabled:    ordfsHost != "",
 	}
 }
 
@@ -147,9 +145,53 @@ func (h *DNSHandler) GetRoot(c *fiber.Ctx) error {
 		return c.Redirect(redirectURL)
 	}
 
-	c.Set("Content-Type", resp.ContentType)
-	c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
-	return c.Send(resp.Content)
+	return h.contentHandler.sendContentResponse(c, resp, seq)
+}
+
+func (h *DNSHandler) HandleAll(c *fiber.Ctx) error {
+	ctx := context.Background()
+	path := c.Path()
+	hostname := c.Hostname()
+
+	// Special case: exact root path
+	if path == "/" {
+		return h.GetRoot(c)
+	}
+
+	// Try to parse path as pointer with optional seq and file path
+	parsed, parseErr := parsePointerPath(path, "")
+
+	// If successfully parsed as pointer, try direct load
+	if parseErr == nil {
+		_, _, err := resolvePointerToOutpoint(parsed.Pointer)
+		if err == nil {
+			// Valid pointer - load directly (canonical host behavior)
+			resolver := NewDirectoryResolver(h.contentHandler)
+			return resolver.Resolve(ctx, c, parsed.Pointer, parsed.Seq, parsed.FilePath)
+		}
+	}
+
+	// Not a valid pointer - check if on DNS domain
+	if !h.ordfsEnabled || hostname == h.ordfsHost {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "not found",
+		})
+	}
+
+	// Load pointer from DNS
+	dnsPointer, dnsSeq, err := h.loadPointerFromDNS(hostname)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "no ordfs configuration found for domain",
+		})
+	}
+
+	// Treat entire path as file path in DNS-resolved directory
+	filePath := strings.TrimPrefix(path, "/")
+
+	// Use DirectoryResolver with DNS pointer
+	resolver := NewDirectoryResolver(h.contentHandler)
+	return resolver.Resolve(ctx, c, dnsPointer, dnsSeq, filePath)
 }
 
 func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
@@ -194,9 +236,7 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 			return c.Redirect(redirectURL)
 		}
 
-		c.Set("Content-Type", resp.ContentType)
-		c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
-		return c.Send(resp.Content)
+		return h.contentHandler.sendContentResponse(c, resp, -1)
 	}
 
 	slog.Debug("Direct content load failed, trying DNS resolution", "hostname", hostname, "error", err)
@@ -279,7 +319,5 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 
 	slog.Debug("File loaded successfully", "contentType", fileResp.ContentType, "size", len(fileResp.Content))
 
-	c.Set("Content-Type", fileResp.ContentType)
-	c.Set("X-Outpoint", fileResp.Outpoint.OrdinalString())
-	return c.Send(fileResp.Content)
+	return h.contentHandler.sendContentResponse(c, fileResp, -1)
 }
