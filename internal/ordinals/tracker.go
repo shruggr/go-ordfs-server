@@ -450,21 +450,25 @@ func (t *Tracker) Resolve(ctx context.Context, requestedOutpoint *transaction.Ou
 			if err != nil {
 				return nil, fmt.Errorf("failed to get spend: %w", err)
 			}
+			slog.Debug("Got spend txid", "spendTxid", spendTxid)
 			if spendTxid != nil {
 				currentTx, err = t.txLoader.LoadTx(ctx, spendTxid.String())
 				if err != nil {
 					return nil, fmt.Errorf("failed to load spending tx: %w", err)
 				}
+				slog.Debug("Loaded spending tx", "txid", currentTx.TxID().String(), "outputs", len(currentTx.Outputs))
 
 				lastRevision.Outpoint, err = t.calculateOrdinalOutput(ctx, currentTx, crawlStartOutpoint)
 				if err != nil {
 					return nil, fmt.Errorf("failed to calculate ordinal output: %w", err)
 				}
+				slog.Debug("Calculated next position", "outpoint", lastRevision.Outpoint.OrdinalString(), "nextSeq", crawlStartSeq+1)
 				lastRevision.Sequence = crawlStartSeq + 1
 			} else {
-				// End of chain - the last cached position is our final position
+				// End of chain - use the cached outpoint as final position
 				lastRevision.Outpoint = crawlStartOutpoint
 				lastRevision.Sequence = crawlStartSeq
+				slog.Debug("End of chain at cached position", "seq", crawlStartSeq, "outpoint", crawlStartOutpoint.OrdinalString())
 			}
 		} else {
 			// Starting from origin
@@ -481,6 +485,7 @@ func (t *Tracker) Resolve(ctx context.Context, requestedOutpoint *transaction.Ou
 		}
 
 		// Step 3a: Crawl forward
+		slog.Debug("Entering crawl loop", "currentTx", currentTx != nil, "lastRevision.Outpoint", lastRevision.Outpoint.OrdinalString(), "seq", lastRevision.Sequence)
 		for currentTx != nil && lastRevision.Outpoint != nil {
 			select {
 			case <-ctx.Done():
@@ -489,7 +494,7 @@ func (t *Tracker) Resolve(ctx context.Context, requestedOutpoint *transaction.Ou
 			}
 
 			// Parse current transaction at outpoint
-			slog.Debug("Crawling", "seq", lastRevision.Sequence, "outpoint", lastRevision.Outpoint.OrdinalString())
+			slog.Debug("Crawling", "seq", lastRevision.Sequence, "outpoint", lastRevision.Outpoint.OrdinalString(), "txid", currentTx.TxID().String())
 
 			if int(lastRevision.Outpoint.Index) >= len(currentTx.Outputs) {
 				return nil, fmt.Errorf("invalid outpoint index")
