@@ -86,12 +86,12 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 	return h.sendContentResponse(c, resp, seq)
 }
 
-func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.ContentResponse, version int) error {
+func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.ContentResponse, seq int) error {
 	c.Set("Content-Type", resp.ContentType)
-	c.Set("X-Outpoint", resp.Outpoint.String())
-	c.Set("X-Seq", fmt.Sprintf("%d", resp.Sequence))
+	c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
+	c.Set("X-Ord-Seq", fmt.Sprintf("%d", resp.Sequence))
 
-	if version == -1 {
+	if seq == -1 {
 		c.Set("Cache-Control", "public, max-age=60")
 	} else {
 		c.Set("Cache-Control", "public, max-age=86400, immutable")
@@ -105,6 +105,11 @@ func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.Conten
 
 	if c.QueryBool("out", false) && len(resp.Output) > 0 {
 		c.Set("X-Output", base64.StdEncoding.EncodeToString(resp.Output))
+	}
+
+	// For HEAD requests, omit the body
+	if c.Method() == fiber.MethodHead {
+		return nil
 	}
 
 	return c.Send(resp.Content)
@@ -154,7 +159,7 @@ func (h *ContentHandler) cacheContentResponse(ctx context.Context, cacheKey stri
 	cacheData := map[string]any{
 		"contentType": response.ContentType,
 		"content":     response.Content,
-		"outpoint":    response.Outpoint.String(),
+		"outpoint":    response.Outpoint.OrdinalString(),
 		"sequence":    fmt.Sprintf("%d", response.Sequence),
 		"output":      response.Output,
 	}
@@ -204,21 +209,21 @@ func (h *ContentHandler) loadContentByTxid(ctx context.Context, txHash *chainhas
 	return nil, fmt.Errorf("no inscription or B protocol content found: %w", txloader.ErrNotFound)
 }
 
-func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *transaction.Outpoint, version int, includeMap bool) (*ordinals.ContentResponse, error) {
+func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *transaction.Outpoint, seq int, includeMap bool) (*ordinals.ContentResponse, error) {
 	var cacheKey string
 	var cacheTTL time.Duration
 
-	if version == -1 {
-		cacheKey = fmt.Sprintf("cache:%s:latest", outpoint.String())
+	if seq == -1 {
+		cacheKey = fmt.Sprintf("cache:%s:latest", outpoint.OrdinalString())
 		cacheTTL = 60 * time.Second
 	} else {
-		cacheKey = fmt.Sprintf("cache:%s:%d", outpoint.String(), version)
+		cacheKey = fmt.Sprintf("cache:%s:%d", outpoint.OrdinalString(), seq)
 		cacheTTL = 30 * 24 * time.Hour
 	}
 
 	if cached, found := h.getCachedContent(ctx, cacheKey, includeMap); found {
 		if includeMap && len(cached.MergedMap) == 0 {
-			result, err := h.tracker.Resolve(ctx, outpoint, version, nil, true)
+			result, err := h.tracker.Resolve(ctx, outpoint, seq, true)
 			if err == nil && len(result.MergedMap) > 0 {
 				cached.MergedMap = result.MergedMap
 				if mapJSON, err := json.Marshal(result.MergedMap); err == nil {
@@ -229,7 +234,7 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 		return cached, nil
 	}
 
-	result, err := h.tracker.Resolve(ctx, outpoint, version, nil, includeMap)
+	result, err := h.tracker.Resolve(ctx, outpoint, seq, includeMap)
 	if err != nil {
 		return nil, err
 	}

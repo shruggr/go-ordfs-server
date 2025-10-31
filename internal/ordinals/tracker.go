@@ -25,39 +25,6 @@ func NewTracker(txLoader *txloader.TxLoader, cache *redis.Client) *Tracker {
 	}
 }
 
-func (t *Tracker) ResolveSpend(ctx context.Context, outpoint *transaction.Outpoint) (*transaction.Outpoint, error) {
-	cacheKey := fmt.Sprintf("spend:%s", outpoint.String())
-
-	if cached, err := t.cache.Get(ctx, cacheKey).Result(); err == nil {
-		if nextOutpoint, err := transaction.OutpointFromString(cached); err == nil {
-			return nextOutpoint, nil
-		}
-	}
-
-	spendTxid, err := t.txLoader.GetSpend(ctx, outpoint.String())
-	if err != nil {
-		return nil, err
-	}
-
-	if spendTxid == nil {
-		return nil, nil
-	}
-
-	spendTx, err := t.txLoader.LoadTx(ctx, spendTxid.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to load spending tx: %w", err)
-	}
-
-	nextOutpoint, err := t.calculateOrdinalOutput(ctx, spendTx, outpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	t.cache.Set(ctx, cacheKey, nextOutpoint.String(), 0)
-
-	return nextOutpoint, nil
-}
-
 func (t *Tracker) calculateOrdinalOutput(ctx context.Context, spendTx *transaction.Transaction, spentOutpoint *transaction.Outpoint) (*transaction.Outpoint, error) {
 	var inputIndex int = -1
 	var ordinalOffset uint64 = 0
@@ -100,85 +67,6 @@ func (t *Tracker) calculateOrdinalOutput(ctx context.Context, spendTx *transacti
 	}
 
 	return nil, fmt.Errorf("ordinal output not found (no 1-sat output at ordinal offset)")
-}
-
-func (t *Tracker) mergeExistingChain(ctx context.Context, origin *transaction.Outpoint, intersectionOutpoint *transaction.Outpoint, currentSequence int64, targetVersion int, currentVersion int) (*transaction.Outpoint, int64, bool, error) {
-	intersectionSpendsKey := fmt.Sprintf("spends:%s", intersectionOutpoint.String())
-	existingSpends := t.cache.ZRangeWithScores(ctx, intersectionSpendsKey, 0, -1).Val()
-
-	if len(existingSpends) == 0 {
-		return intersectionOutpoint, currentSequence, false, nil
-	}
-
-	originSpendsKey := fmt.Sprintf("spends:%s", origin.String())
-	originVersionsKey := fmt.Sprintf("versions:%s", origin.String())
-	originMapKey := fmt.Sprintf("map:%s", origin.String())
-
-	for _, member := range existingSpends {
-		outpointStr := member.Member.(string)
-		originalScore := int64(member.Score)
-		newScore := currentSequence + originalScore
-
-		t.cache.ZAdd(ctx, originSpendsKey, redis.Z{
-			Score:  float64(newScore),
-			Member: outpointStr,
-		})
-	}
-
-	intersectionVersionsKey := fmt.Sprintf("versions:%s", intersectionOutpoint.String())
-	existingVersions := t.cache.ZRangeWithScores(ctx, intersectionVersionsKey, 0, -1).Val()
-
-	var targetOutpoint *transaction.Outpoint
-	var targetScore int64
-	foundTarget := false
-
-	for i, member := range existingVersions {
-		outpointStr := member.Member.(string)
-		originalScore := int64(member.Score)
-		newScore := currentSequence + originalScore + 1
-
-		t.cache.ZAdd(ctx, originVersionsKey, redis.Z{
-			Score:  float64(newScore),
-			Member: outpointStr,
-		})
-
-		if targetVersion >= 0 {
-			newVersionCount := currentVersion + i + 1
-			if newVersionCount == targetVersion {
-				targetOutpoint, _ = transaction.OutpointFromString(outpointStr)
-				targetScore = newScore
-				foundTarget = true
-			}
-		}
-	}
-
-	intersectionMapKey := fmt.Sprintf("map:%s", intersectionOutpoint.String())
-	existingMaps := t.cache.ZRangeWithScores(ctx, intersectionMapKey, 0, -1).Val()
-
-	for _, member := range existingMaps {
-		outpointStr := member.Member.(string)
-		originalScore := int64(member.Score)
-		newScore := currentSequence + originalScore
-
-		t.cache.ZAdd(ctx, originMapKey, redis.Z{
-			Score:  float64(newScore),
-			Member: outpointStr,
-		})
-	}
-
-	if foundTarget {
-		return targetOutpoint, targetScore, true, nil
-	}
-
-	lastOutpointStr := existingSpends[len(existingSpends)-1].Member.(string)
-	lastOutpoint, err := transaction.OutpointFromString(lastOutpointStr)
-	if err != nil {
-		return intersectionOutpoint, currentSequence, false, err
-	}
-
-	newSequence := currentSequence + int64(len(existingSpends))
-
-	return lastOutpoint, newSequence, false, nil
 }
 
 type ScriptData struct {
@@ -240,8 +128,8 @@ type ContentResponse struct {
 	Output      []byte
 }
 
-func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, maxScore int64) map[string]string {
-	mapKey := fmt.Sprintf("map:%s", origin.String())
+func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, maxScore int) map[string]string {
+	mapKey := fmt.Sprintf("map:%s", origin.OrdinalString())
 
 	var mapOutpoints []string
 	if maxScore < 0 {
@@ -280,197 +168,337 @@ func (t *Tracker) loadMergedMap(ctx context.Context, origin *transaction.Outpoin
 	return mergedMap
 }
 
-func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, version int, targetOutpoint *transaction.Outpoint, includeMap bool) (*ContentResponse, error) {
+func (t *Tracker) Resolve(ctx context.Context, origin *transaction.Outpoint, seq int, includeMap bool) (*ContentResponse, error) {
 	slog.Debug("Resolve started",
-		"origin", origin.String(),
-		"version", version,
+		"origin", origin.OrdinalString(),
+		"seq", seq,
 		"includeMap", includeMap)
 
-	versionsKey := fmt.Sprintf("versions:%s", origin.String())
-	spendsKey := fmt.Sprintf("spends:%s", origin.String())
-	mapKey := fmt.Sprintf("map:%s", origin.String())
+	spendsKey := fmt.Sprintf("seq:%s", origin.OrdinalString())
+	versionsKey := fmt.Sprintf("rev:%s", origin.OrdinalString())
+	mapKey := fmt.Sprintf("map:%s", origin.OrdinalString())
 
-	var currentOutpoint *transaction.Outpoint
-	var targetRank int64 = -1
-	var currentVersion int
+	// Step 1: Determine target sequence
+	targetSeq := seq
+	if seq == -1 {
+		// For -1, we need to crawl to the end
+		targetSeq = -1
+	}
 
-	if version > 0 {
-		versionMembers := t.cache.ZRangeWithScores(ctx, versionsKey, int64(version), int64(version)).Val()
-		if len(versionMembers) > 0 {
-			currentOutpoint, _ = transaction.OutpointFromString(versionMembers[0].Member.(string))
-			targetRank = int64(versionMembers[0].Score)
-			currentVersion = version
-			slog.Debug("Found cached version", "version", version, "outpoint", currentOutpoint.String())
-		} else {
-			slog.Debug("Version not in cache, will crawl", "version", version)
+	lastRevision := &ContentResponse{
+		MergedMap: make(map[string]string),
+	}
+	// Step 2: Check if we have the outpoint at the target sequence in cache
+	if targetSeq >= 0 {
+		seqMembers := t.cache.ZRangeByScore(ctx, spendsKey, &redis.ZRangeBy{
+			Min:   fmt.Sprintf("%d", targetSeq),
+			Max:   fmt.Sprintf("%d", targetSeq),
+			Count: 1,
+		}).Val()
+		if len(seqMembers) > 0 {
+			lastRevision.Outpoint, _ = transaction.OutpointFromString(seqMembers[0])
+			lastRevision.Sequence = targetSeq
+			slog.Debug("Found cached sequence", "seq", targetSeq, "outpoint", lastRevision.Outpoint.OrdinalString())
 		}
 	}
 
-	var mergedMap map[string]string
-	if includeMap {
-		mergedMap = t.loadMergedMap(ctx, origin, targetRank)
-	}
+	// Step 3: If we need to crawl (no cache hit or seq=-1)
+	var crawlStartSeq int = -1
+	var crawlStartOutpoint *transaction.Outpoint
 
-	if currentOutpoint == nil {
-		var currentSequence int64 = -1
+	if targetSeq == -1 || lastRevision.Outpoint == nil {
+		// Prime the loop with both transaction and outpoint
+		var currentTx *transaction.Transaction
 
 		lastSpendMembers := t.cache.ZRevRangeWithScores(ctx, spendsKey, 0, 0).Val()
 		if len(lastSpendMembers) > 0 {
-			currentSequence = int64(lastSpendMembers[0].Score)
-			currentOutpoint, _ = transaction.OutpointFromString(lastSpendMembers[0].Member.(string))
+			// Resume from last cached position - get its spend
+			crawlStartSeq = int(lastSpendMembers[0].Score)
+			crawlStartOutpoint, _ = transaction.OutpointFromString(lastSpendMembers[0].Member.(string))
+			slog.Debug("Resuming from cached position", "seq", crawlStartSeq, "outpoint", crawlStartOutpoint.OrdinalString())
+
+			spendTxid, err := t.txLoader.GetSpend(ctx, crawlStartOutpoint.OrdinalString())
+			if err != nil {
+				return nil, fmt.Errorf("failed to get spend: %w", err)
+			}
+			if spendTxid != nil {
+				currentTx, err = t.txLoader.LoadTx(ctx, spendTxid.String())
+				if err != nil {
+					return nil, fmt.Errorf("failed to load spending tx: %w", err)
+				}
+
+				lastRevision.Outpoint, err = t.calculateOrdinalOutput(ctx, currentTx, crawlStartOutpoint)
+				if err != nil {
+					return nil, fmt.Errorf("failed to calculate ordinal output: %w", err)
+				}
+			}
+			lastRevision.Sequence = crawlStartSeq + 1
+		} else {
+			// Starting from origin
+			crawlStartSeq = -1
+			lastRevision.Outpoint = origin
+			lastRevision.Sequence = 0
+			slog.Debug("Starting crawl from origin", "outpoint", origin.OrdinalString())
+
+			var err error
+			currentTx, err = t.txLoader.LoadTx(ctx, lastRevision.Outpoint.Txid.String())
+			if err != nil {
+				return nil, fmt.Errorf("failed to load origin tx: %w", err)
+			}
 		}
 
-		if currentOutpoint == nil {
-			currentOutpoint = origin
-			currentSequence = -1
-		}
-
-		var contentType string
-		var content []byte
-		currentVersion := int(t.cache.ZCard(ctx, versionsKey).Val())
-
-		for {
+		// Step 3a: Crawl forward
+		for currentTx != nil && lastRevision.Outpoint != nil {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			default:
 			}
 
-			currentSequence++
+			// Parse current transaction at outpoint
+			slog.Debug("Crawling", "seq", lastRevision.Sequence, "outpoint", lastRevision.Outpoint.OrdinalString())
 
-			slog.Debug("Crawling",
-				"sequence", currentSequence,
-				"outpoint", currentOutpoint.String())
-
-			tx, err := t.txLoader.LoadTx(ctx, currentOutpoint.Txid.String())
-			if err != nil {
-				return nil, fmt.Errorf("failed to load tx: %w", err)
-			}
-
-			if int(currentOutpoint.Index) >= len(tx.Outputs) {
+			if int(lastRevision.Outpoint.Index) >= len(currentTx.Outputs) {
 				return nil, fmt.Errorf("invalid outpoint index")
 			}
 
-			output := tx.Outputs[currentOutpoint.Index]
-
+			output := currentTx.Outputs[lastRevision.Outpoint.Index]
 			scriptData := t.parseScript(output.LockingScript)
 
-			if len(scriptData.MapData) > 0 {
-				t.cache.ZAdd(ctx, mapKey, redis.Z{
-					Score:  float64(currentSequence),
-					Member: currentOutpoint.String(),
-				})
-				if includeMap {
-					if mergedMap == nil {
-						mergedMap = make(map[string]string)
-					}
-					for k, v := range scriptData.MapData {
-						mergedMap[k] = v
-					}
-				}
-			}
+			lastRevision.Output = output.Bytes()
 
-			if scriptData.Content != nil {
-				contentType = scriptData.ContentType
-				content = scriptData.Content
-
-				if version >= 0 && currentVersion == version {
-					return &ContentResponse{
-						Outpoint:    currentOutpoint,
-						ContentType: contentType,
-						Content:     content,
-						MergedMap:   mergedMap,
-						Sequence:    currentVersion,
-						Output:      output.Bytes(),
-					}, nil
-				}
-
-				if currentSequence > 0 {
-					t.cache.ZAdd(ctx, versionsKey, redis.Z{
-						Score:  float64(currentSequence),
-						Member: currentOutpoint.String(),
-					})
-					currentVersion++
-				}
-			} else if currentSequence == 0 {
-				return nil, fmt.Errorf("no inscription found at origin")
-			}
-
-			nextOutpoint, err := t.ResolveSpend(ctx, currentOutpoint)
-			if err != nil {
-				return nil, err
-			}
-
-			if nextOutpoint == nil {
-				if version == -1 {
-					if content == nil {
-						return nil, fmt.Errorf("no content found in chain: %w", txloader.ErrNotFound)
-					}
-					return &ContentResponse{
-						Outpoint:    currentOutpoint,
-						ContentType: contentType,
-						Content:     content,
-						MergedMap:   mergedMap,
-						Sequence:    currentVersion,
-						Output:      output.Bytes(),
-					}, nil
-				}
-				return nil, fmt.Errorf("version %d not found (reached end at version %d): %w", version, currentVersion, txloader.ErrNotFound)
-			}
-
+			// Cache in seq:
 			t.cache.ZAdd(ctx, spendsKey, redis.Z{
-				Score:  float64(currentSequence),
-				Member: currentOutpoint.String(),
+				Score:  float64(lastRevision.Sequence),
+				Member: lastRevision.Outpoint.OrdinalString(),
 			})
 
-			mergedOutpoint, mergedSequence, foundTarget, err := t.mergeExistingChain(ctx, origin, nextOutpoint, currentSequence, version, currentVersion)
-			if err != nil {
-				return nil, fmt.Errorf("failed to merge existing chain: %w", err)
+			// If has content, update lastRevision and cache in rev:
+			if scriptData.Content != nil {
+				t.cache.ZAdd(ctx, versionsKey, redis.Z{
+					Score:  float64(lastRevision.Sequence),
+					Member: lastRevision.Outpoint.OrdinalString(),
+				})
+
+				lastRevision.Content = scriptData.Content
+				lastRevision.ContentType = scriptData.ContentType
 			}
 
-			if mergedOutpoint != nextOutpoint {
+			// If has MAP, merge and cache in map:
+			if len(scriptData.MapData) > 0 {
+				t.cache.ZAdd(ctx, mapKey, redis.Z{
+					Score:  float64(lastRevision.Sequence),
+					Member: lastRevision.Outpoint.OrdinalString(),
+				})
+
 				if includeMap {
-					chainMapData := t.loadMergedMap(ctx, nextOutpoint, mergedSequence-currentSequence-1)
-					if mergedMap == nil && len(chainMapData) > 0 {
-						mergedMap = make(map[string]string)
+					for k, v := range scriptData.MapData {
+						lastRevision.MergedMap[k] = v
 					}
-					for k, v := range chainMapData {
-						mergedMap[k] = v
+				}
+			}
+
+			// Check if we've reached the target sequence
+			if targetSeq >= 0 && lastRevision.Sequence >= targetSeq {
+				break
+			}
+
+			// Check for existing cached chain to merge
+			nextSpendKey := fmt.Sprintf("seq:%s", lastRevision.Outpoint.OrdinalString())
+			if t.cache.ZCard(ctx, nextSpendKey).Val() > 1 {
+				// Found intersection with existing chain (more than just the current entry), merge it
+				mergedOutpoint, mergedSeq, err := t.mergeExistingChain(ctx, origin, lastRevision.Outpoint, lastRevision.Sequence)
+				if err != nil {
+					return nil, fmt.Errorf("failed to merge existing chain: %w", err)
+				}
+
+				// Load MAP data from the merged range if needed
+				if includeMap {
+					mergedMaps := t.loadMergedMap(ctx, lastRevision.Outpoint, mergedSeq-lastRevision.Sequence)
+					for k, v := range mergedMaps {
+						lastRevision.MergedMap[k] = v
 					}
 				}
 
-				if foundTarget {
-					currentOutpoint = mergedOutpoint
-					currentSequence = mergedSequence
+				// Check if there are any inscriptions in the merged range
+				if t.cache.ZCard(ctx, fmt.Sprintf("rev:%s", lastRevision.Outpoint.OrdinalString())).Val() > 0 {
+					// Clear content so it gets loaded from cache after the loop
+					lastRevision.Content = nil
+					lastRevision.ContentType = ""
+				}
+
+				// If we found the target in the merged chain, we're done
+				if targetSeq >= 0 && mergedSeq >= targetSeq {
 					break
 				}
 
-				currentOutpoint = mergedOutpoint
-				currentSequence = mergedSequence
-			} else {
-				currentOutpoint = nextOutpoint
+				// Otherwise, we've jumped ahead
+				lastRevision.Outpoint = mergedOutpoint
+				lastRevision.Sequence = mergedSeq
+			}
+
+			// Get the next spend to continue crawling
+			spendTxid, err := t.txLoader.GetSpend(ctx, lastRevision.Outpoint.OrdinalString())
+			if err != nil {
+				return nil, fmt.Errorf("failed to get spend: %w", err)
+			}
+			if spendTxid == nil {
+				// End of chain
+				break
+			}
+
+			currentTx, err = t.txLoader.LoadTx(ctx, spendTxid.String())
+			if err != nil {
+				return nil, fmt.Errorf("failed to load spending tx: %w", err)
+			}
+
+			lastRevision.Outpoint, err = t.calculateOrdinalOutput(ctx, currentTx, lastRevision.Outpoint)
+			if err != nil {
+				return nil, fmt.Errorf("failed to calculate ordinal output: %w", err)
+			}
+
+			// Increment sequence for next iteration
+			lastRevision.Sequence++
+		}
+
+		// If seq=-1, the last outpoint we crawled to is our target
+		if targetSeq == -1 && lastRevision.Sequence >= 0 {
+			targetSeq = lastRevision.Sequence
+		}
+	}
+
+	// Step 4: Build response
+	// If we crawled and found content, lastRevision already has it
+	if lastRevision.Content == nil {
+		// Load last revision from cache
+		revMembers := t.cache.ZRevRangeByScoreWithScores(ctx, versionsKey, &redis.ZRangeBy{
+			Min: "0",
+			Max: fmt.Sprintf("%d", targetSeq),
+		}).Val()
+
+		if len(revMembers) == 0 {
+			return nil, fmt.Errorf("no inscription found: %w", txloader.ErrNotFound)
+		}
+
+		revOutpoint, _ := transaction.OutpointFromString(revMembers[0].Member.(string))
+
+		tx, err := t.txLoader.LoadTx(ctx, revOutpoint.Txid.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load tx: %w", err)
+		}
+
+		if int(revOutpoint.Index) >= len(tx.Outputs) {
+			return nil, fmt.Errorf("invalid outpoint index")
+		}
+
+		output := tx.Outputs[revOutpoint.Index]
+		scriptData := t.parseScript(output.LockingScript)
+
+		lastRevision.Content = scriptData.Content
+		lastRevision.ContentType = scriptData.ContentType
+
+		// If revision is at the same outpoint as current position, use the same output
+		if lastRevision.Outpoint != nil && *revOutpoint == *lastRevision.Outpoint {
+			lastRevision.Output = output.Bytes()
+		}
+	}
+
+	// Load output from current position if not already set
+	if lastRevision.Output == nil && lastRevision.Outpoint != nil {
+		tx, err := t.txLoader.LoadTx(ctx, lastRevision.Outpoint.Txid.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load tx for output: %w", err)
+		}
+		if int(lastRevision.Outpoint.Index) >= len(tx.Outputs) {
+			return nil, fmt.Errorf("invalid outpoint index")
+		}
+		lastRevision.Output = tx.Outputs[lastRevision.Outpoint.Index].Bytes()
+	}
+
+	// Load MAP data if needed
+	if includeMap {
+		// Load all MAP entries from before we started crawling
+		preCrawlMaps := t.loadMergedMap(ctx, origin, crawlStartSeq)
+
+		// Merge with what we accumulated during crawl
+		if len(preCrawlMaps) > 0 {
+			if lastRevision.MergedMap == nil {
+				lastRevision.MergedMap = make(map[string]string)
+			}
+			// Pre-crawl maps go first, then we overlay crawled maps on top
+			for k, v := range preCrawlMaps {
+				if _, exists := lastRevision.MergedMap[k]; !exists {
+					lastRevision.MergedMap[k] = v
+				}
 			}
 		}
 	}
 
-	tx, err := t.txLoader.LoadTx(ctx, currentOutpoint.Txid.String())
+	return lastRevision, nil
+}
+
+func (t *Tracker) mergeExistingChain(ctx context.Context, origin *transaction.Outpoint, intersectionOutpoint *transaction.Outpoint, currentSeq int) (*transaction.Outpoint, int, error) {
+	intersectionSpendsKey := fmt.Sprintf("seq:%s", intersectionOutpoint.OrdinalString())
+	existingSpends := t.cache.ZRangeWithScores(ctx, intersectionSpendsKey, 0, -1).Val()
+
+	if len(existingSpends) == 0 {
+		return intersectionOutpoint, currentSeq, nil
+	}
+
+	originSpendsKey := fmt.Sprintf("seq:%s", origin.OrdinalString())
+	originVersionsKey := fmt.Sprintf("rev:%s", origin.OrdinalString())
+	originMapKey := fmt.Sprintf("map:%s", origin.OrdinalString())
+
+	// Merge seq: data
+	for _, member := range existingSpends {
+		outpointStr := member.Member.(string)
+		originalScore := int(member.Score)
+		newScore := currentSeq + originalScore
+
+		t.cache.ZAdd(ctx, originSpendsKey, redis.Z{
+			Score:  float64(newScore),
+			Member: outpointStr,
+		})
+	}
+
+	// Merge rev: data
+	intersectionVersionsKey := fmt.Sprintf("rev:%s", intersectionOutpoint.OrdinalString())
+	existingVersions := t.cache.ZRangeWithScores(ctx, intersectionVersionsKey, 0, -1).Val()
+
+	for _, member := range existingVersions {
+		outpointStr := member.Member.(string)
+		originalScore := int(member.Score)
+		newScore := currentSeq + originalScore + 1
+
+		t.cache.ZAdd(ctx, originVersionsKey, redis.Z{
+			Score:  float64(newScore),
+			Member: outpointStr,
+		})
+	}
+
+	// Merge map: data
+	intersectionMapKey := fmt.Sprintf("map:%s", intersectionOutpoint.OrdinalString())
+	existingMaps := t.cache.ZRangeWithScores(ctx, intersectionMapKey, 0, -1).Val()
+
+	for _, member := range existingMaps {
+		outpointStr := member.Member.(string)
+		originalScore := int(member.Score)
+		newScore := currentSeq + originalScore
+
+		t.cache.ZAdd(ctx, originMapKey, redis.Z{
+			Score:  float64(newScore),
+			Member: outpointStr,
+		})
+	}
+
+	// Return the last outpoint in the merged chain
+	lastOutpointStr := existingSpends[len(existingSpends)-1].Member.(string)
+	lastOutpoint, err := transaction.OutpointFromString(lastOutpointStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load tx: %w", err)
+		return intersectionOutpoint, currentSeq, err
 	}
 
-	if int(currentOutpoint.Index) >= len(tx.Outputs) {
-		return nil, fmt.Errorf("invalid outpoint index")
-	}
+	newSequence := currentSeq + len(existingSpends)
 
-	output := tx.Outputs[currentOutpoint.Index]
-	scriptData := t.parseScript(output.LockingScript)
-
-	return &ContentResponse{
-		Outpoint:    currentOutpoint,
-		ContentType: scriptData.ContentType,
-		Content:     scriptData.Content,
-		MergedMap:   mergedMap,
-		Sequence:    currentVersion,
-		Output:      output.Bytes(),
-	}, nil
+	return lastOutpoint, newSequence, nil
 }

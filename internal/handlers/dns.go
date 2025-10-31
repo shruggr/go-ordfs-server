@@ -46,10 +46,10 @@ func (h *DNSHandler) loadPointerFromDNS(hostname string) (string, int, error) {
 	if cached, err := h.cache.Get(ctx, cacheKey).Result(); err == nil {
 		var dnsRecord struct {
 			Pointer string `json:"pointer"`
-			Version int    `json:"version"`
+			Seq     int    `json:"seq"`
 		}
 		if err := json.Unmarshal([]byte(cached), &dnsRecord); err == nil {
-			return dnsRecord.Pointer, dnsRecord.Version, nil
+			return dnsRecord.Pointer, dnsRecord.Seq, nil
 		}
 	}
 
@@ -66,26 +66,26 @@ func (h *DNSHandler) loadPointerFromDNS(hostname string) (string, int, error) {
 
 			parts := strings.Split(value, ":")
 			pointer := parts[0]
-			version := 0
+			seq := -1
 
 			if len(parts) > 1 {
-				if v, err := strconv.Atoi(parts[1]); err == nil {
-					version = v
+				if s, err := strconv.Atoi(parts[1]); err == nil {
+					seq = s
 				}
 			}
 
 			dnsRecord := struct {
 				Pointer string `json:"pointer"`
-				Version int    `json:"version"`
+				Seq     int    `json:"seq"`
 			}{
 				Pointer: pointer,
-				Version: version,
+				Seq:     seq,
 			}
 			if cachedBytes, err := json.Marshal(dnsRecord); err == nil {
 				h.cache.Set(ctx, cacheKey, cachedBytes, 5*time.Minute)
 			}
 
-			return pointer, version, nil
+			return pointer, seq, nil
 		}
 	}
 
@@ -107,7 +107,7 @@ func (h *DNSHandler) GetRoot(c *fiber.Ctx) error {
 		return h.frontendHandler.RenderIndex(c)
 	}
 
-	pointer, version, err := h.loadPointerFromDNS(hostname)
+	pointer, seq, err := h.loadPointerFromDNS(hostname)
 	if err != nil {
 		slog.Debug("DNS lookup failed", "hostname", hostname, "error", err)
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -115,7 +115,7 @@ func (h *DNSHandler) GetRoot(c *fiber.Ctx) error {
 		})
 	}
 
-	slog.Debug("DNS pointer found", "hostname", hostname, "pointer", pointer, "version", version)
+	slog.Debug("DNS pointer found", "hostname", hostname, "pointer", pointer, "seq", seq)
 
 	outpoint, err := transaction.OutpointFromString(pointer)
 	if err != nil {
@@ -125,21 +125,21 @@ func (h *DNSHandler) GetRoot(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := h.contentHandler.loadContentByOutpoint(ctx, outpoint, version, false)
+	resp, err := h.contentHandler.loadContentByOutpoint(ctx, outpoint, seq, false)
 	if err != nil {
 		if errors.Is(err, txloader.ErrNotFound) {
-			slog.Debug("Inscription not found", "outpoint", outpoint.String())
+			slog.Debug("Inscription not found", "outpoint", outpoint.OrdinalString())
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "inscription not found",
 			})
 		}
-		slog.Error("Failed to load content", "outpoint", outpoint.String(), "error", err)
+		slog.Error("Failed to load content", "outpoint", outpoint.OrdinalString(), "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	slog.Debug("Content loaded", "outpoint", outpoint.String(), "contentType", resp.ContentType, "size", len(resp.Content))
+	slog.Debug("Content loaded", "outpoint", outpoint.OrdinalString(), "contentType", resp.ContentType, "size", len(resp.Content))
 
 	if resp.ContentType == "ord-fs/json" && c.Query("raw") == "" {
 		redirectURL := "/index.html"
@@ -148,7 +148,7 @@ func (h *DNSHandler) GetRoot(c *fiber.Ctx) error {
 	}
 
 	c.Set("Content-Type", resp.ContentType)
-	c.Set("X-Outpoint", resp.Outpoint.String())
+	c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
 	return c.Send(resp.Content)
 }
 
@@ -176,13 +176,13 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		outpoint, parseErr := transaction.OutpointFromString(fileOrPointer + "_0")
 		if parseErr == nil {
 			slog.Debug("Attempting to load as txid", "fileOrPointer", fileOrPointer)
-			resp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, 0, false)
+			resp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, -1, false)
 		}
 	} else {
 		outpoint, parseErr := transaction.OutpointFromString(fileOrPointer)
 		if parseErr == nil {
 			slog.Debug("Attempting to load as outpoint", "fileOrPointer", fileOrPointer)
-			resp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, 0, false)
+			resp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, -1, false)
 		}
 	}
 
@@ -195,7 +195,7 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		}
 
 		c.Set("Content-Type", resp.ContentType)
-		c.Set("X-Outpoint", resp.Outpoint.String())
+		c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
 		return c.Send(resp.Content)
 	}
 
@@ -208,7 +208,7 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		})
 	}
 
-	pointer, version, dnsErr := h.loadPointerFromDNS(hostname)
+	pointer, seq, dnsErr := h.loadPointerFromDNS(hostname)
 	if dnsErr != nil {
 		slog.Debug("DNS lookup failed for file resolution", "hostname", hostname, "error", dnsErr)
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -216,7 +216,7 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		})
 	}
 
-	slog.Debug("Loading directory from DNS pointer", "pointer", pointer, "version", version)
+	slog.Debug("Loading directory from DNS pointer", "pointer", pointer, "seq", seq)
 
 	dirOutpoint, err := transaction.OutpointFromString(pointer)
 	if err != nil {
@@ -226,9 +226,9 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		})
 	}
 
-	dirResp, err := h.contentHandler.loadContentByOutpoint(ctx, dirOutpoint, version, false)
+	dirResp, err := h.contentHandler.loadContentByOutpoint(ctx, dirOutpoint, seq, false)
 	if err != nil {
-		slog.Debug("Directory not found", "outpoint", dirOutpoint.String(), "error", err)
+		slog.Debug("Directory not found", "outpoint", dirOutpoint.OrdinalString(), "error", err)
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "directory not found",
 		})
@@ -236,7 +236,7 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 
 	var directory map[string]string
 	if err := json.Unmarshal(dirResp.Content, &directory); err != nil {
-		slog.Error("Invalid directory format", "outpoint", dirOutpoint.String(), "error", err)
+		slog.Error("Invalid directory format", "outpoint", dirOutpoint.OrdinalString(), "error", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid directory format",
 		})
@@ -261,17 +261,17 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 		})
 	}
 
-	slog.Debug("Loading file from directory", "file", fileOrPointer, "outpoint", fileOutpoint.String())
+	slog.Debug("Loading file from directory", "file", fileOrPointer, "outpoint", fileOutpoint.OrdinalString())
 
-	fileResp, err := h.contentHandler.loadContentByOutpoint(ctx, fileOutpoint, 0, false)
+	fileResp, err := h.contentHandler.loadContentByOutpoint(ctx, fileOutpoint, -1, false)
 	if err != nil {
 		if errors.Is(err, txloader.ErrNotFound) {
-			slog.Debug("File content not found", "outpoint", fileOutpoint.String())
+			slog.Debug("File content not found", "outpoint", fileOutpoint.OrdinalString())
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "file not found",
 			})
 		}
-		slog.Error("Failed to load file content", "outpoint", fileOutpoint.String(), "error", err)
+		slog.Error("Failed to load file content", "outpoint", fileOutpoint.OrdinalString(), "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -280,6 +280,6 @@ func (h *DNSHandler) GetFileOrPointer(c *fiber.Ctx) error {
 	slog.Debug("File loaded successfully", "contentType", fileResp.ContentType, "size", len(fileResp.Content))
 
 	c.Set("Content-Type", fileResp.ContentType)
-	c.Set("X-Outpoint", fileResp.Outpoint.String())
+	c.Set("X-Outpoint", fileResp.Outpoint.OrdinalString())
 	return c.Send(fileResp.Content)
 }

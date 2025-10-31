@@ -53,7 +53,7 @@ func (h *DirectoryHandler) GetFile(c *fiber.Ctx) error {
 				"error": fmt.Sprintf("invalid pointer: %v", parseErr),
 			})
 		}
-		dirResp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, 0, false)
+		dirResp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, -1, false)
 	}
 
 	if err != nil {
@@ -100,7 +100,7 @@ func (h *DirectoryHandler) GetFile(c *fiber.Ctx) error {
 				"error": fmt.Sprintf("invalid file pointer: %v", parseErr),
 			})
 		}
-		fileResp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, 0, false)
+		fileResp, err = h.contentHandler.loadContentByOutpoint(ctx, outpoint, -1, false)
 	}
 
 	if err != nil {
@@ -115,6 +115,6 @@ func (h *DirectoryHandler) GetFile(c *fiber.Ctx) error {
 	}
 
 	c.Set("Content-Type", fileResp.ContentType)
-	c.Set("X-Outpoint", fileResp.Outpoint.String())
+	c.Set("X-Outpoint", fileResp.Outpoint.OrdinalString())
 	return c.Send(fileResp.Content)
 }
