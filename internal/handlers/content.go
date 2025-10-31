@@ -89,6 +89,7 @@ func (h *ContentHandler) GetContent(c *fiber.Ctx) error {
 func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.ContentResponse, seq int) error {
 	c.Set("Content-Type", resp.ContentType)
 	c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
+	c.Set("X-Origin", resp.Origin.OrdinalString())
 	c.Set("X-Ord-Seq", fmt.Sprintf("%d", resp.Sequence))
 
 	if seq == -1 {
@@ -131,6 +132,11 @@ func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, 
 
 	resolvedOutpoint, _ := transaction.OutpointFromString(outpointStr)
 
+	var origin *transaction.Outpoint
+	if originStr, ok := cached["origin"]; ok && originStr != "" {
+		origin, _ = transaction.OutpointFromString(originStr)
+	}
+
 	sequence := 0
 	if seqStr, ok := cached["sequence"]; ok {
 		fmt.Sscanf(seqStr, "%d", &sequence)
@@ -140,6 +146,7 @@ func (h *ContentHandler) getCachedContent(ctx context.Context, cacheKey string, 
 		ContentType: contentType,
 		Content:     []byte(content),
 		Outpoint:    resolvedOutpoint,
+		Origin:      origin,
 		Sequence:    sequence,
 		Output:      []byte(cached["output"]),
 	}
@@ -162,6 +169,10 @@ func (h *ContentHandler) cacheContentResponse(ctx context.Context, cacheKey stri
 		"outpoint":    response.Outpoint.OrdinalString(),
 		"sequence":    fmt.Sprintf("%d", response.Sequence),
 		"output":      response.Output,
+	}
+
+	if response.Origin != nil {
+		cacheData["origin"] = response.Origin.OrdinalString()
 	}
 
 	if len(response.MergedMap) > 0 {
@@ -247,6 +258,7 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 		ContentType: result.ContentType,
 		Content:     result.Content,
 		Outpoint:    result.Outpoint,
+		Origin:      result.Origin,
 		MergedMap:   result.MergedMap,
 		Sequence:    result.Sequence,
 		Output:      result.Output,
@@ -255,7 +267,6 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 	h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
 	return response, nil
 }
-
 
 func (h *ContentHandler) extractContent(output *transaction.TransactionOutput) (contentType string, content []byte) {
 	if insc := inscription.Decode(output.LockingScript); insc != nil && insc.File.Content != nil {
