@@ -53,11 +53,11 @@ func (t *Tracker) calculateOrdinalOutput(ctx context.Context, spendTx *transacti
 
 	var cumulativeSats uint64 = 0
 	for i, output := range spendTx.Outputs {
-		if output.Satoshis != 1 {
+		if output.Satoshis == 0 {
 			continue
 		}
 
-		if cumulativeSats == ordinalOffset {
+		if cumulativeSats == ordinalOffset && output.Satoshis == 1 {
 			return &transaction.Outpoint{
 				Txid:  *spendTx.TxID(),
 				Index: uint32(i),
