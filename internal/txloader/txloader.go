@@ -77,7 +77,6 @@ func (t *TxLoader) LoadOutput(ctx context.Context, outpoint *transaction.Outpoin
 	}
 
 	url := fmt.Sprintf("%s/v1/txo/get/%s", t.junglebusURL, outpoint.OrdinalString())
-	slog.Debug("Fetching output from JungleBus", "url", url)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -86,12 +85,10 @@ func (t *TxLoader) LoadOutput(ctx context.Context, outpoint *transaction.Outpoin
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
-		slog.Debug("Output not found in JungleBus", "outpoint", outpoint.OrdinalString())
 		return nil, ErrNotFound
 	}
 
 	if resp.StatusCode != 200 {
-		slog.Debug("JungleBus output error", "outpoint", outpoint.OrdinalString(), "status", resp.StatusCode)
 		return nil, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
 	}
 

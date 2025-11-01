@@ -236,18 +236,36 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 	}
 
 	if cached, found := h.getCachedContent(ctx, cacheKey, includeMap); found {
-		if includeMap && len(cached.MergedMap) == 0 {
-			result, err := h.tracker.Resolve(ctx, outpoint, seq, true)
-			if err == nil && len(result.MergedMap) > 0 {
-				cached.MergedMap = result.MergedMap
-				if mapJSON, err := json.Marshal(result.MergedMap); err == nil {
-					h.cache.HSet(ctx, cacheKey, "map", string(mapJSON))
-				}
-			}
-		}
 		return cached, nil
 	}
 
+	// Load the output to check if it's a 1-sat ordinal
+	output, err := h.txLoader.LoadOutput(ctx, outpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load output: %w", err)
+	}
+
+	// Non-1-sat outputs don't use ordinal tracking
+	if output.Satoshis != 1 {
+		contentType, content := h.extractContent(output)
+		if content == nil {
+			return nil, fmt.Errorf("no inscription or B protocol content found: %w", txloader.ErrNotFound)
+		}
+
+		response := &ordinals.ContentResponse{
+			ContentType: contentType,
+			Content:     content,
+			Outpoint:    outpoint,
+			Origin:      nil,
+			Sequence:    0,
+			Output:      output.Bytes(),
+		}
+
+		h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
+		return response, nil
+	}
+
+	// 1-sat output - use ordinal tracking
 	result, err := h.tracker.Resolve(ctx, outpoint, seq, includeMap)
 	if err != nil {
 		return nil, err
