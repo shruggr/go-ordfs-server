@@ -96,7 +96,7 @@ func (h *ContentHandler) sendContentResponse(c *fiber.Ctx, resp *ordinals.Conten
 	c.Set("X-Ord-Seq", fmt.Sprintf("%d", resp.Sequence))
 
 	if seq == -1 {
-		c.Set("Cache-Control", "public, max-age=60")
+		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	} else {
 		c.Set("Cache-Control", "public, max-age=86400, immutable")
 	}
@@ -235,8 +235,11 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 		cacheTTL = 30 * 24 * time.Hour
 	}
 
-	if cached, found := h.getCachedContent(ctx, cacheKey, includeMap); found {
-		return cached, nil
+	// Temporarily disable caching for seq=-1
+	if seq != -1 {
+		if cached, found := h.getCachedContent(ctx, cacheKey, includeMap); found {
+			return cached, nil
+		}
 	}
 
 	// Load the output to check if it's a 1-sat ordinal
@@ -285,7 +288,10 @@ func (h *ContentHandler) loadContentByOutpoint(ctx context.Context, outpoint *tr
 		Output:      result.Output,
 	}
 
-	h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
+	// Temporarily disable caching for seq=-1
+	if seq != -1 {
+		h.cacheContentResponse(ctx, cacheKey, cacheTTL, response)
+	}
 	return response, nil
 }
 
