@@ -14,6 +14,7 @@ import (
 	"github.com/bsv-blockchain/go-sdk/chainhash"
 	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
+	"github.com/bsv-blockchain/go-sdk/util"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -112,10 +113,17 @@ func (t *TxLoader) parseOutput(bytes []byte) (*transaction.TransactionOutput, er
 		return nil, fmt.Errorf("output too short: %d bytes", len(bytes))
 	}
 
-	lockingScript := script.Script(bytes[8:])
+	satoshis := binary.LittleEndian.Uint64(bytes[0:8])
+
+	// Parse the varint that specifies the script length
+	_, varintSize := util.NewVarIntFromBytes(bytes[8:])
+
+	// The actual script starts after the 8-byte satoshi field and the varint
+	scriptStart := 8 + varintSize
+	lockingScript := script.Script(bytes[scriptStart:])
 
 	return &transaction.TransactionOutput{
-		Satoshis:      binary.LittleEndian.Uint64(bytes[0:8]),
+		Satoshis:      satoshis,
 		LockingScript: &lockingScript,
 	}, nil
 }
