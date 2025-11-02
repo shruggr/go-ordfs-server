@@ -44,4 +44,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20251029205829-c7fc3fb6f034
+replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20251101192731-1c507a0c0895
