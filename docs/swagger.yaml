@@ -37,24 +37,24 @@ paths:
                     type: string
                     example: ok
 
-  /block/latest:
+  /v1/bsv/block/latest:
     get:
       summary: Get latest block
-      description: Returns the latest block state from the longest chain
+      description: Returns the latest block header from the longest chain
       operationId: getLatestBlock
       tags:
         - Block
       responses:
         '200':
-          description: Latest block state
+          description: Latest block header (flattened structure)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BlockState'
+                $ref: '#/components/schemas/BlockHeader'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /block/height/{height}:
+  /v1/bsv/block/height/{height}:
     get:
       summary: Get block by height
       description: Returns block header for a specific height
@@ -80,7 +80,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /block/hash/{hash}:
+  /v1/bsv/block/hash/{hash}:
     get:
       summary: Get block by hash
       description: Returns block state for a specific hash
@@ -107,7 +107,7 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /tx/{txid}:
+  /v1/bsv/tx/{txid}:
     get:
       summary: Get raw transaction
       description: Returns raw transaction bytes
@@ -134,6 +134,53 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  /preview/{b64HtmlData}:
+    get:
+      summary: Render HTML preview
+      description: Renders base64-encoded HTML data as a preview
+      operationId: renderPreview
+      tags:
+        - Preview
+      parameters:
+        - name: b64HtmlData
+          in: path
+          required: true
+          description: Base64-encoded HTML data
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rendered HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /preview:
+    post:
+      summary: Render HTML preview (POST)
+      description: Renders HTML data from request body as a preview
+      operationId: renderPreviewPost
+      tags:
+        - Preview
+      requestBody:
+        required: true
+        content:
+          text/html:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Rendered HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /content/{txidOrOutpoint}:
     get:
@@ -396,10 +443,40 @@ components:
 
     BlockState:
       type: object
-      description: Block state information including header and chain status
+      description: Block state information including header and chain status (flattened structure)
       properties:
-        header:
-          $ref: '#/components/schemas/BlockHeader'
+        height:
+          type: integer
+          description: Block height in the chain
+          example: 800000
+        hash:
+          type: string
+          description: Block hash (64 hex characters)
+          example: 000000000000000000d5c78530c2e25e8b8b8e2e2a8f8e8e2e2a8f8e8e2e2a8f
+        version:
+          type: integer
+          description: Block version number
+          example: 536870912
+        prevBlockHash:
+          type: string
+          description: Hash of the previous block
+          example: 000000000000000000a5c78530c2e25e8b8b8e2e2a8f8e8e2e2a8f8e8e2e2a8f
+        merkleRoot:
+          type: string
+          description: Merkle root hash of all transactions
+          example: 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
+        creationTimestamp:
+          type: integer
+          description: Block creation timestamp (Unix epoch)
+          example: 1234567890
+        difficultyTarget:
+          type: integer
+          description: Difficulty target (bits field)
+          example: 486604799
+        nonce:
+          type: integer
+          description: Nonce used in proof-of-work
+          example: 1234567890
         state:
           type: string
           description: Block chain state
@@ -409,10 +486,6 @@ components:
             - ORPHAN
             - REJECTED
           example: LONGEST_CHAIN
-        height:
-          type: integer
-          description: Block height
-          example: 800000
 
     Error:
       type: object
@@ -450,6 +523,8 @@ tags:
     description: Block information queries
   - name: Transaction
     description: Transaction data retrieval
+  - name: Preview
+    description: HTML preview rendering
   - name: Content
     description: Inscription and content retrieval
   - name: DNS

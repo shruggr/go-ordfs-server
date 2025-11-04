@@ -7,11 +7,11 @@ import (
 )
 
 func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockHandler *handlers.BlockHandler, txHandler *handlers.TxHandler, dnsHandler *handlers.DNSHandler, frontendHandler *handlers.FrontendHandler) {
-	app.Static("/docs", "./docs")
+	app.Static("/v1/docs", "./docs")
 	app.Static("/public", "./frontend/public")
 
-	app.Get("/docs/*", swagger.New(swagger.Config{
-		URL:          "/docs/swagger.yaml",
+	app.Get("/v1/docs/*", swagger.New(swagger.Config{
+		URL:          "/v1/docs/swagger.yaml",
 		DeepLinking:  true,
 		DocExpansion: "list",
 		TryItOutEnabled: true,
@@ -23,16 +23,11 @@ func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockH
 		})
 	})
 
-	// Block endpoints (backward compatible)
-	app.Get("/block/latest", blockHandler.GetLatest)
-	app.Get("/block/height/:height", blockHandler.GetByHeight)
-	app.Get("/block/hash/:hash", blockHandler.GetByHash)
-
-	// Block endpoints (v1/bsv prefix for production compatibility)
+	// Block and transaction endpoints
 	app.Get("/v1/bsv/block/latest", blockHandler.GetLatest)
 	app.Get("/v1/bsv/block/height/:height", blockHandler.GetByHeight)
 	app.Get("/v1/bsv/block/hash/:hash", blockHandler.GetByHash)
-	app.Get("/tx/:txid", txHandler.GetRawTx)
+	app.Get("/v1/bsv/tx/:txid", txHandler.GetRawTx)
 
 	app.Get("/preview/:b64HtmlData", frontendHandler.RenderPreview)
 	app.Post("/preview", frontendHandler.RenderPreviewPost)
