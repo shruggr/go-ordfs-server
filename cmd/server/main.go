@@ -9,9 +9,9 @@ import (
 	"syscall"
 
 	"github.com/joho/godotenv"
-	"github.com/shruggr/go-ordfs-server/internal/api"
-	"github.com/shruggr/go-ordfs-server/internal/cache"
-	"github.com/shruggr/go-ordfs-server/internal/config"
+	"github.com/shruggr/go-ordfs-server/api"
+	"github.com/shruggr/go-ordfs-server/cache"
+	"github.com/shruggr/go-ordfs-server/config"
 )
 
 func main() {

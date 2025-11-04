@@ -1,0 +1,18 @@
+
+ ┌───────────────────────────────────────────────────┐ 
+ │                  go-ordfs-server                  │ 
+ │                   Fiber v2.52.9                   │ 
+ │               http://127.0.0.1:3000               │ 
+ │       (bound on host 0.0.0.0 and port 3000)       │ 
+ │                                                   │ 
+ │ Handlers ............ 29  Processes ........... 1 │ 
+ │ Prefork ....... Disabled  PID ............. 22435 │ 
+ └───────────────────────────────────────────────────┘ 
+
+{"time":"2025-11-04T01:00:10.127888-05:00","level":"DEBUG","msg":"DNS GetRoot","hostname":"localhost:3000","ordfsHost":"","ordfsEnabled":false,"path":"/"}
+{"time":"2025-11-04T01:00:10.127949-05:00","level":"DEBUG","msg":"Rendering frontend index","hostname":"localhost:3000"}
+01:00:09 | 200 |    1.940917ms | 127.0.0.1 | GET | / | -
+01:00:09 | 404 |      140.25µs | 127.0.0.1 | GET | /.well-known/appspecific/com.chrome.devtools.json | -
+{"time":"2025-11-04T01:00:10.563922-05:00","level":"DEBUG","msg":"Resolve started","requestedOutpoint":"eb6f151ee52b5d65cb89481e89e76655e6af83f697f0af88b7ccf46e3174baaa_0","seq":null}
+01:00:10 | 200 |      703.25µs | 127.0.0.1 | GET | /eb6f151ee52b5d65cb89481e89e76655e6af83f697f0af88b7ccf46e3174baaa_0 | -
+01:00:10 | 200 |  185.339292ms | 127.0.0.1 | GET | /v1/bsv/block/latest | -
