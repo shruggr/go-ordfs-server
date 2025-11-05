@@ -42,36 +42,22 @@ func (o *Ordfs) Load(ctx context.Context, req *Request) (*Response, error) {
 		return nil, fmt.Errorf("failed to load output: %w", err)
 	}
 
-	if output.Satoshis != 1 {
-		contentType, content, mapData := parseOutput(ctx, o.cache, req.Outpoint, output)
-		if content == nil {
-			return nil, fmt.Errorf("no inscription or B protocol content found: %w", loader.ErrNotFound)
-		}
-
-		response := &Response{
-			ContentType: contentType,
-			Content:     content,
-			Map:         mapData,
-			Outpoint:    req.Outpoint,
-			Origin:      nil,
-			Sequence:    0,
-		}
-		if req.Output {
-			response.Output = output.Bytes()
-		}
-
-		return response, nil
+	var loadReq *LoadRequest
+	if output.Satoshis != 1 || req.Seq == nil {
+		resp := o.parseOutput(ctx, req.Outpoint, output, req.Content)
+		resp.Outpoint = req.Outpoint
+		return resp, nil
 	}
 
-	fullResolution, err := o.Resolve(ctx, req.Outpoint, req.Seq)
+	fullResolution, err := o.Resolve(ctx, req.Outpoint, *req.Seq)
 	if err != nil {
 		return nil, err
 	}
 
-	loadReq := &LoadRequest{
-		Outpoint: req.Outpoint,
+	loadReq = &LoadRequest{
+		Outpoint: fullResolution.Current,
 		Origin:   fullResolution.Origin,
-		Sequence: fullResolution.Sequence,
+		Sequence: &fullResolution.Sequence,
 	}
 
 	if req.Content {
@@ -82,6 +68,9 @@ func (o *Ordfs) Load(ctx context.Context, req *Request) (*Response, error) {
 	}
 	if req.Output {
 		loadReq.Output = fullResolution.Current
+	}
+	if req.Parent {
+		loadReq.Parent = fullResolution.Parent
 	}
 
 	response, err := o.LoadResolution(ctx, loadReq)
@@ -107,25 +96,22 @@ func (o *Ordfs) loadByTxid(ctx context.Context, req *Request) (*Response, error)
 			Txid:  *req.Txid,
 			Index: uint32(i),
 		}
-		contentType, content, mapData := parseOutput(ctx, o.cache, outpoint, output)
-		if content != nil {
-			response := &Response{
-				ContentType: contentType,
-				Outpoint:    outpoint,
-				Sequence:    0,
-			}
+		resp := o.parseOutput(ctx, outpoint, output, req.Content)
+		if resp.Content != nil {
+			resp.Outpoint = outpoint
+			resp.Sequence = 0
 
-			if req.Content {
-				response.Content = content
+			if !req.Content {
+				resp.Content = nil
 			}
-			if req.Map {
-				response.Map = mapData
+			if !req.Map {
+				resp.Map = ""
 			}
 			if req.Output {
-				response.Output = output.Bytes()
+				resp.Output = output.Bytes()
 			}
 
-			return response, nil
+			return resp, nil
 		}
 	}
 
@@ -275,8 +261,16 @@ func (o *Ordfs) calculatePreviousOrdinalInput(ctx context.Context, tx *transacti
 		}
 	}
 
+	slog.Debug("calculatePreviousOrdinalInput",
+		"outpoint", currentOutpoint.OrdinalString(),
+		"txid", currentOutpoint.Txid.String(),
+		"outputIndex", currentOutpoint.Index,
+		"numOutputs", len(tx.Outputs),
+		"numInputs", len(tx.Inputs),
+		"ordinalOffset", ordinalOffset)
+
 	var cumulativeSats uint64 = 0
-	for _, input := range tx.Inputs {
+	for i, input := range tx.Inputs {
 		prevOutpoint := &transaction.Outpoint{
 			Txid:  *input.SourceTXID,
 			Index: input.SourceTxOutIndex,
@@ -287,20 +281,31 @@ func (o *Ordfs) calculatePreviousOrdinalInput(ctx context.Context, tx *transacti
 			return nil, fmt.Errorf("failed to load input output %s: %w", prevOutpoint.OrdinalString(), err)
 		}
 
+		slog.Debug("Checking input",
+			"inputIndex", i,
+			"prevOutpoint", prevOutpoint.OrdinalString(),
+			"prevSatoshis", prevOutput.Satoshis,
+			"cumulativeSats", cumulativeSats,
+			"ordinalOffset", ordinalOffset)
+
 		if cumulativeSats == ordinalOffset {
 			if prevOutput.Satoshis != 1 {
+				slog.Debug("Found offset but not 1-sat", "satoshis", prevOutput.Satoshis)
 				return nil, nil
 			}
+			slog.Debug("Found previous ordinal input", "prevOutpoint", prevOutpoint.OrdinalString())
 			return prevOutpoint, nil
 		}
 
 		cumulativeSats += prevOutput.Satoshis
 		if cumulativeSats > ordinalOffset {
-			break
+			slog.Debug("Ordinal offset found within multi-sat input, this is the origin")
+			return nil, nil
 		}
 	}
 
-	return nil, fmt.Errorf("could not find input containing ordinal at offset %d", ordinalOffset)
+	slog.Debug("Finished checking all inputs without exact match, this is the origin")
+	return nil, nil
 }
 
 func (o *Ordfs) saveBackwardProgress(ctx context.Context, requestedOutpoint *transaction.Outpoint, chain []ChainEntry) {
@@ -414,14 +419,17 @@ func (o *Ordfs) backwardCrawl(ctx context.Context, requestedOutpoint *transactio
 		}
 
 		currentOutput := currentTx.Outputs[currentOutpoint.Index]
-		_, content, mapData := parseOutput(ctx, o.cache, currentOutpoint, currentOutput)
+		resp := o.parseOutput(ctx, currentOutpoint, currentOutput, true)
 
-		var entryContentOutpoint, entryMapOutpoint *transaction.Outpoint
-		if content != nil {
+		var entryContentOutpoint, entryMapOutpoint, entryParentOutpoint *transaction.Outpoint
+		if resp.Content != nil {
 			entryContentOutpoint = currentOutpoint
 		}
-		if len(mapData) > 0 {
+		if resp.Map != "" {
 			entryMapOutpoint = currentOutpoint
+		}
+		if resp.Parent != nil {
+			entryParentOutpoint = currentOutpoint
 		}
 
 		chain = append(chain, ChainEntry{
@@ -429,6 +437,7 @@ func (o *Ordfs) backwardCrawl(ctx context.Context, requestedOutpoint *transactio
 			RelativeSeq:     relativeSeq,
 			ContentOutpoint: entryContentOutpoint,
 			MapOutpoint:     entryMapOutpoint,
+			ParentOutpoint:  entryParentOutpoint,
 		})
 
 		prevOutpoint, err := o.calculatePreviousOrdinalInput(ctx, currentTx, currentOutpoint)
@@ -474,6 +483,7 @@ func (o *Ordfs) migrateToOrigin(ctx context.Context, requestedOutpoint, origin *
 	originSeqKey := fmt.Sprintf("seq:%s", origin.OrdinalString())
 	originRevKey := fmt.Sprintf("rev:%s", origin.OrdinalString())
 	originMapKey := fmt.Sprintf("map:%s", origin.OrdinalString())
+	originParentKey := fmt.Sprintf("parents:%s", origin.OrdinalString())
 
 	members := make([]redis.Z, len(chain))
 	originUpdates := make(map[string]interface{})
@@ -499,6 +509,13 @@ func (o *Ordfs) migrateToOrigin(ctx context.Context, requestedOutpoint, origin *
 				Member: entry.MapOutpoint.OrdinalString(),
 			})
 		}
+
+		if entry.ParentOutpoint != nil {
+			pipe.ZAdd(ctx, originParentKey, redis.Z{
+				Score:  float64(absoluteSeq),
+				Member: entry.ParentOutpoint.OrdinalString(),
+			})
+		}
 	}
 
 	pipe.ZAdd(ctx, originSeqKey, members...)
@@ -518,82 +535,110 @@ func (o *Ordfs) migrateToOrigin(ctx context.Context, requestedOutpoint, origin *
 	return nil
 }
 
-func (o *Ordfs) forwardCrawl(ctx context.Context, origin *transaction.Outpoint, startOutpoint *transaction.Outpoint, startSeq int, targetSeq int) (*transaction.Outpoint, int, error) {
-	seqKey := fmt.Sprintf("seq:%s", origin.OrdinalString())
-	revKey := fmt.Sprintf("rev:%s", origin.OrdinalString())
-	mapKey := fmt.Sprintf("map:%s", origin.OrdinalString())
+func (o *Ordfs) forwardCrawl(ctx context.Context, req *ForwardCrawlRequest) (*ForwardCrawlResponse, error) {
+	seqKey := fmt.Sprintf("seq:%s", req.Origin.OrdinalString())
+	revKey := fmt.Sprintf("rev:%s", req.Origin.OrdinalString())
+	mapKey := fmt.Sprintf("map:%s", req.Origin.OrdinalString())
+	parentKey := fmt.Sprintf("parents:%s", req.Origin.OrdinalString())
 
-	currentOutpoint := startOutpoint
-	currentSeq := startSeq
+	currentOutpoint := req.StartOutpoint
+	currentSeq := req.StartSeq
+	parentFound := false
 
-	slog.Debug("Starting forward crawl", "origin", origin.OrdinalString(), "start", startOutpoint.OrdinalString(), "startSeq", startSeq, "targetSeq", targetSeq)
+	slog.Debug("Starting forward crawl", "origin", req.Origin.OrdinalString(), "start", req.StartOutpoint.OrdinalString(), "startSeq", req.StartSeq, "targetSeq", req.TargetSeq, "parentValidation", req.ParentOutpoints != nil)
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, 0, ctx.Err()
+			return nil, ctx.Err()
 		default:
+		}
+
+		o.cache.HSet(ctx, "origins", currentOutpoint.OrdinalString(), req.Origin.OrdinalString())
+
+		if req.ParentOutpoints != nil && req.ParentOutpoints[currentOutpoint.OrdinalString()] {
+			slog.Debug("Found parent match during crawl", "outpoint", currentOutpoint.OrdinalString())
+			return &ForwardCrawlResponse{
+				Outpoint:    currentOutpoint,
+				Sequence:    currentSeq,
+				ParentFound: true,
+			}, nil
 		}
 
 		tx, err := o.loader.LoadTx(ctx, currentOutpoint.Txid.String())
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to load tx: %w", err)
+			return nil, fmt.Errorf("failed to load tx: %w", err)
 		}
 
 		if int(currentOutpoint.Index) >= len(tx.Outputs) {
-			return nil, 0, fmt.Errorf("invalid outpoint index")
+			return nil, fmt.Errorf("invalid outpoint index")
 		}
 
 		output := tx.Outputs[currentOutpoint.Index]
-		_, content, mapData := parseOutput(ctx, o.cache, currentOutpoint, output)
+		resp := o.parseOutput(ctx, currentOutpoint, output, true)
 
 		o.cache.ZAdd(ctx, seqKey, redis.Z{
 			Score:  float64(currentSeq),
 			Member: currentOutpoint.OrdinalString(),
 		})
 
-		if content != nil {
+		if resp.Content != nil {
 			o.cache.ZAdd(ctx, revKey, redis.Z{
 				Score:  float64(currentSeq),
 				Member: currentOutpoint.OrdinalString(),
 			})
 		}
 
-		if len(mapData) > 0 {
+		if resp.Map != "" {
 			o.cache.ZAdd(ctx, mapKey, redis.Z{
 				Score:  float64(currentSeq),
 				Member: currentOutpoint.OrdinalString(),
 			})
 		}
 
-		slog.Debug("Forward crawl step", "seq", currentSeq, "outpoint", currentOutpoint.OrdinalString(), "hasContent", content != nil, "hasMap", len(mapData) > 0)
+		if resp.Parent != nil {
+			o.cache.ZAdd(ctx, parentKey, redis.Z{
+				Score:  float64(currentSeq),
+				Member: currentOutpoint.OrdinalString(),
+			})
+		}
 
-		if targetSeq >= 0 && currentSeq >= targetSeq {
-			slog.Debug("Reached target sequence", "seq", currentSeq, "target", targetSeq)
+		slog.Debug("Forward crawl step", "seq", currentSeq, "outpoint", currentOutpoint.OrdinalString(), "hasContent", resp.Content != nil, "hasMap", resp.Map != "")
+
+		if req.TargetSeq >= 0 && currentSeq >= req.TargetSeq {
+			slog.Debug("Reached target sequence", "seq", currentSeq, "target", req.TargetSeq)
 			break
 		}
 
 		nextSpendKey := fmt.Sprintf("seq:%s", currentOutpoint.OrdinalString())
 		if o.cache.ZCard(ctx, nextSpendKey).Val() > 1 {
-			mergedOutpoint, mergedSeq, err := o.mergeExistingChain(ctx, origin, currentOutpoint, currentSeq)
+			mergedOutpoint, mergedSeq, err := o.mergeExistingChain(ctx, req.Origin, currentOutpoint, currentSeq)
 			if err != nil {
-				return nil, 0, fmt.Errorf("failed to merge existing chain: %w", err)
+				return nil, fmt.Errorf("failed to merge existing chain: %w", err)
 			}
 
 			slog.Debug("Merged with existing chain", "from", currentSeq, "to", mergedSeq)
 
-			if targetSeq >= 0 && mergedSeq >= targetSeq {
+			if req.TargetSeq >= 0 && mergedSeq >= req.TargetSeq {
 				targetMembers := o.cache.ZRangeByScore(ctx, seqKey, &redis.ZRangeBy{
-					Min:   fmt.Sprintf("%d", targetSeq),
-					Max:   fmt.Sprintf("%d", targetSeq),
+					Min:   fmt.Sprintf("%d", req.TargetSeq),
+					Max:   fmt.Sprintf("%d", req.TargetSeq),
 					Count: 1,
 				}).Val()
 				if len(targetMembers) > 0 {
 					if targetOutpoint, err := transaction.OutpointFromString(targetMembers[0]); err == nil {
-						return targetOutpoint, targetSeq, nil
+						return &ForwardCrawlResponse{
+							Outpoint:    targetOutpoint,
+							Sequence:    req.TargetSeq,
+							ParentFound: parentFound,
+						}, nil
 					}
 				}
-				return mergedOutpoint, mergedSeq, nil
+				return &ForwardCrawlResponse{
+					Outpoint:    mergedOutpoint,
+					Sequence:    mergedSeq,
+					ParentFound: parentFound,
+				}, nil
 			}
 
 			currentOutpoint = mergedOutpoint
@@ -602,7 +647,7 @@ func (o *Ordfs) forwardCrawl(ctx context.Context, origin *transaction.Outpoint, 
 
 		spendTxid, err := o.loader.GetSpend(ctx, currentOutpoint.OrdinalString())
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to get spend: %w", err)
+			return nil, fmt.Errorf("failed to get spend: %w", err)
 		}
 		if spendTxid == nil {
 			slog.Debug("Reached end of chain", "seq", currentSeq)
@@ -611,12 +656,12 @@ func (o *Ordfs) forwardCrawl(ctx context.Context, origin *transaction.Outpoint, 
 
 		spendTx, err := o.loader.LoadTx(ctx, spendTxid.String())
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to load spending tx: %w", err)
+			return nil, fmt.Errorf("failed to load spending tx: %w", err)
 		}
 
 		nextOutpoint, err := o.calculateOrdinalOutput(ctx, spendTx, currentOutpoint)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to calculate ordinal output: %w", err)
+			return nil, fmt.Errorf("failed to calculate ordinal output: %w", err)
 		}
 
 		currentOutpoint = nextOutpoint
@@ -624,7 +669,11 @@ func (o *Ordfs) forwardCrawl(ctx context.Context, origin *transaction.Outpoint, 
 	}
 
 	slog.Debug("Forward crawl complete", "finalSeq", currentSeq, "finalOutpoint", currentOutpoint.OrdinalString())
-	return currentOutpoint, currentSeq, nil
+	return &ForwardCrawlResponse{
+		Outpoint:    currentOutpoint,
+		Sequence:    currentSeq,
+		ParentFound: parentFound,
+	}, nil
 }
 
 func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, mapOutpoint *transaction.Outpoint) (map[string]string, error) {
@@ -650,7 +699,7 @@ func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint,
 	for _, outpointStr := range mapOutpoints {
 		outpoint, err := transaction.OutpointFromString(outpointStr)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to parse outpoint %s: %w", outpointStr, err)
 		}
 
 		cacheKey := fmt.Sprintf("parsed:%s", outpoint.OrdinalString())
@@ -658,13 +707,19 @@ func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint,
 
 		mapJSON := o.cache.HGet(ctx, cacheKey, "map").Val()
 		if mapJSON != "" {
-			json.Unmarshal([]byte(mapJSON), &individualMap)
-		} else if o.cache.Exists(ctx, cacheKey).Val() == 0 {
-			output, err := o.loader.LoadOutput(ctx, outpoint)
-			if err != nil {
-				continue
+			if err := json.Unmarshal([]byte(mapJSON), &individualMap); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal cached map for %s: %w", outpoint.OrdinalString(), err)
 			}
-			_, _, individualMap = parseOutput(ctx, o.cache, outpoint, output)
+		} else if o.cache.Exists(ctx, cacheKey).Val() == 0 {
+			resp, err := o.loadAndParse(ctx, outpoint, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load and parse outpoint %s: %w", outpoint.OrdinalString(), err)
+			}
+			if resp.Map != "" {
+				if err := json.Unmarshal([]byte(resp.Map), &individualMap); err != nil {
+					return nil, fmt.Errorf("failed to unmarshal response map for %s: %w", outpoint.OrdinalString(), err)
+				}
+			}
 		}
 
 		for k, v := range individualMap {
@@ -679,24 +734,86 @@ func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint,
 	return mergedMap, nil
 }
 
-func (o *Ordfs) LoadResolution(ctx context.Context, req *LoadRequest) (*Response, error) {
-	response := &Response{
+func (o *Ordfs) validateParent(ctx context.Context, parentOutpoint *transaction.Outpoint, childOrigin *transaction.Outpoint) (*transaction.Outpoint, error) {
+	parentOriginStr := o.cache.HGet(ctx, "origins", parentOutpoint.OrdinalString()).Val()
+	var parentOrigin *transaction.Outpoint
+
+	if parentOriginStr == "" {
+		// Parent hasn't been crawled yet - crawl it now to find its origin
+		slog.Debug("Parent origin not found, crawling", "parentOutpoint", parentOutpoint.OrdinalString())
+		var err error
+		parentOrigin, err = o.backwardCrawl(ctx, parentOutpoint)
+		if err != nil {
+			return nil, fmt.Errorf("failed to crawl parent: %w", err)
+		}
+	} else {
+		var err error
+		parentOrigin, err = transaction.OutpointFromString(parentOriginStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse parent origin: %w", err)
+		}
+	}
+
+	childOriginTx, err := o.loader.LoadTx(ctx, childOrigin.Txid.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load child origin tx: %w", err)
+	}
+
+	for _, input := range childOriginTx.Inputs {
+		if input.SourceTXID != nil {
+			inputOutpoint := &transaction.Outpoint{
+				Txid:  *input.SourceTXID,
+				Index: input.SourceTxOutIndex,
+			}
+
+			inputOriginStr := o.cache.HGet(ctx, "origins", inputOutpoint.OrdinalString()).Val()
+			if inputOriginStr == parentOrigin.OrdinalString() {
+				slog.Debug("Parent validated via cached input origin", "input", inputOutpoint.OrdinalString(), "parentOrigin", parentOrigin.OrdinalString())
+				return parentOrigin, nil
+			}
+		}
+	}
+
+	inputOutpoints := make(map[string]bool)
+	for _, input := range childOriginTx.Inputs {
+		if input.SourceTXID != nil {
+			outpoint := &transaction.Outpoint{
+				Txid:  *input.SourceTXID,
+				Index: input.SourceTxOutIndex,
+			}
+			inputOutpoints[outpoint.OrdinalString()] = true
+		}
+	}
+
+	crawlResp, err := o.forwardCrawl(ctx, &ForwardCrawlRequest{
+		Origin:          parentOrigin,
+		StartOutpoint:   parentOrigin,
+		StartSeq:        0,
+		TargetSeq:       -1,
+		ParentOutpoints: inputOutpoints,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("parent validation crawl failed: %w", err)
+	}
+
+	if !crawlResp.ParentFound {
+		return nil, fmt.Errorf("parent origin was not spent in child origin transaction")
+	}
+
+	return parentOrigin, nil
+}
+
+func (o *Ordfs) LoadResolution(ctx context.Context, req *LoadRequest) (response *Response, err error) {
+	response = &Response{
 		Outpoint: req.Outpoint,
 		Origin:   req.Origin,
-		Sequence: req.Sequence,
+	}
+	if req.Sequence != nil {
+		response.Sequence = *req.Sequence
 	}
 
-	var contentMapData map[string]string
-
-	if req.Content != nil {
-		contentType, content, mapData, err := loadAndParse(ctx, o.cache, o.loader, req.Content)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load content: %w", err)
-		}
-		response.ContentType = contentType
-		response.Content = content
-		contentMapData = mapData
-	}
+	contentCache := make(map[transaction.Outpoint]*Response)
 
 	if req.Output != nil {
 		output, err := o.loader.LoadOutput(ctx, req.Output)
@@ -706,30 +823,61 @@ func (o *Ordfs) LoadResolution(ctx context.Context, req *LoadRequest) (*Response
 		response.Output = output.Bytes()
 	}
 
+	if req.Content != nil {
+		resp, err := o.loadAndParse(ctx, req.Content, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load content: %w", err)
+		}
+		contentCache[*req.Content] = resp
+		response.ContentType = resp.ContentType
+		response.Content = resp.Content
+		response.ContentLength = resp.ContentLength
+	}
+
 	if req.Map != nil {
-		if req.Sequence == 0 {
-			if req.Content != nil && req.Map.OrdinalString() == req.Content.OrdinalString() {
-				response.Map = contentMapData
-			} else {
-				_, _, mapData, err := loadAndParse(ctx, o.cache, o.loader, req.Map)
+		if req.Sequence == nil {
+			var cachedResponse *Response
+			if cachedResponse = contentCache[*req.Content]; cachedResponse == nil {
+				cachedResponse, err = o.loadAndParse(ctx, req.Content, true)
 				if err != nil {
-					return nil, fmt.Errorf("failed to load map: %w", err)
+					return nil, fmt.Errorf("failed to load content: %w", err)
 				}
-				response.Map = mapData
+				contentCache[*req.Content] = cachedResponse
 			}
+			response.Map = cachedResponse.Map
 		} else {
 			mergedMap, err := o.loadMergedMap(ctx, req.Origin, req.Map)
 			if err != nil {
 				return nil, fmt.Errorf("failed to load merged map: %w", err)
 			}
-			response.Map = mergedMap
+			if mergedJSON, err := json.Marshal(mergedMap); err == nil {
+				response.Map = string(mergedJSON)
+			}
+		}
+	}
+
+	if req.Parent != nil {
+		var cachedResponse *Response
+		if cachedResponse = contentCache[*req.Parent]; cachedResponse == nil {
+			cachedResponse, err = o.loadAndParse(ctx, req.Parent, false)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load parent outpoint: %w", err)
+			}
+			contentCache[*req.Parent] = cachedResponse
+		}
+		if cachedResponse.Parent != nil {
+			parentOrigin, err := o.validateParent(ctx, cachedResponse.Parent, req.Origin)
+			if err != nil {
+				return nil, fmt.Errorf("parent validation failed: %w", err)
+			}
+			response.Parent = parentOrigin
 		}
 	}
 
 	return response, nil
 }
 
-func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outpoint, seq *int) (*Resolution, error) {
+func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outpoint, seq int) (*Resolution, error) {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
@@ -737,15 +885,15 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 		"requestedOutpoint", requestedOutpoint.OrdinalString(),
 		"seq", seq)
 
-	if seq == nil {
-		return &Resolution{
-			Origin:   requestedOutpoint,
-			Current:  requestedOutpoint,
-			Content:  requestedOutpoint,
-			Map:      requestedOutpoint,
-			Sequence: 0,
-		}, nil
-	}
+	// if seq == nil {
+	// 	return &Resolution{
+	// 		Origin:   requestedOutpoint,
+	// 		Current:  requestedOutpoint,
+	// 		Content:  requestedOutpoint,
+	// 		Map:      requestedOutpoint,
+	// 		Sequence: nil,
+	// 	}, nil
+	// }
 
 	knownOriginStr := o.cache.HGet(ctx, "origins", requestedOutpoint.OrdinalString()).Val()
 	var origin *transaction.Outpoint
@@ -769,8 +917,8 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 	requestedSeqScore := o.cache.ZScore(ctx, seqKey, requestedOutpoint.OrdinalString()).Val()
 	requestedAbsoluteSeq := int(requestedSeqScore)
 
-	targetAbsoluteSeq := *seq
-	if *seq == -1 {
+	targetAbsoluteSeq := seq
+	if seq == -1 {
 		targetAbsoluteSeq = -1
 	}
 
@@ -791,7 +939,11 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 			Count: 1,
 		}).Val()
 		if len(seqMembers) > 0 {
-			targetOutpoint, _ = transaction.OutpointFromString(seqMembers[0])
+			var err error
+			targetOutpoint, err = transaction.OutpointFromString(seqMembers[0])
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse cached target outpoint: %w", err)
+			}
 			slog.Debug("Found cached target sequence", "absoluteSeq", targetAbsoluteSeq, "outpoint", targetOutpoint.OrdinalString())
 		}
 	}
@@ -803,7 +955,11 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 		lastSpendMembers := o.cache.ZRevRangeWithScores(ctx, seqKey, 0, 0).Val()
 		if len(lastSpendMembers) > 0 {
 			crawlStartSeq = int(lastSpendMembers[0].Score)
-			crawlStartOutpoint, _ = transaction.OutpointFromString(lastSpendMembers[0].Member.(string))
+			var err error
+			crawlStartOutpoint, err = transaction.OutpointFromString(lastSpendMembers[0].Member.(string))
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse cached crawl start outpoint: %w", err)
+			}
 			slog.Debug("Resuming crawl from cached position", "seq", crawlStartSeq, "outpoint", crawlStartOutpoint.OrdinalString())
 		} else {
 			crawlStartOutpoint = origin
@@ -811,14 +967,18 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 			slog.Debug("Starting crawl from origin", "outpoint", origin.OrdinalString())
 		}
 
-		var err error
-		var finalSeq int
-		_, finalSeq, err = o.forwardCrawl(ctx, origin, crawlStartOutpoint, crawlStartSeq, targetAbsoluteSeq)
+		crawlResp, err := o.forwardCrawl(ctx, &ForwardCrawlRequest{
+			Origin:        origin,
+			StartOutpoint: crawlStartOutpoint,
+			StartSeq:      crawlStartSeq,
+			TargetSeq:     targetAbsoluteSeq,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("forward crawl failed: %w", err)
 		}
+		finalSeq := crawlResp.Sequence
 
-		if *seq == -1 {
+		if seq == -1 {
 			targetAbsoluteSeq = finalSeq
 		}
 
@@ -829,7 +989,11 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 				Count: 1,
 			}).Val()
 			if len(targetMembers) > 0 {
-				targetOutpoint, _ = transaction.OutpointFromString(targetMembers[0])
+				var err error
+				targetOutpoint, err = transaction.OutpointFromString(targetMembers[0])
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse target outpoint after crawl: %w", err)
+				}
 			} else {
 				return nil, fmt.Errorf("target sequence %d not found (chain ends at %d): %w", targetAbsoluteSeq, finalSeq, loader.ErrNotFound)
 			}
@@ -847,9 +1011,11 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 		Max: fmt.Sprintf("%d", targetAbsoluteSeq),
 	}).Val()
 	if len(revMembers) > 0 {
-		if contentOutpoint, err := transaction.OutpointFromString(revMembers[0]); err == nil {
-			resolution.Content = contentOutpoint
+		contentOutpoint, err := transaction.OutpointFromString(revMembers[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse cached content outpoint: %w", err)
 		}
+		resolution.Content = contentOutpoint
 	}
 
 	mapMembers := o.cache.ZRevRangeByScore(ctx, mapKey, &redis.ZRangeBy{
@@ -857,9 +1023,24 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 		Max: fmt.Sprintf("%d", targetAbsoluteSeq),
 	}).Val()
 	if len(mapMembers) > 0 {
-		if mapOutpoint, err := transaction.OutpointFromString(mapMembers[0]); err == nil {
-			resolution.Map = mapOutpoint
+		mapOutpoint, err := transaction.OutpointFromString(mapMembers[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse cached map outpoint: %w", err)
 		}
+		resolution.Map = mapOutpoint
+	}
+
+	parentKey := fmt.Sprintf("parents:%s", origin.OrdinalString())
+	parentMembers := o.cache.ZRevRangeByScore(ctx, parentKey, &redis.ZRangeBy{
+		Min: "0",
+		Max: fmt.Sprintf("%d", targetAbsoluteSeq),
+	}).Val()
+	if len(parentMembers) > 0 {
+		parentOutpoint, err := transaction.OutpointFromString(parentMembers[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse cached parent outpoint: %w", err)
+		}
+		resolution.Parent = parentOutpoint
 	}
 
 	if resolution.Content == nil {

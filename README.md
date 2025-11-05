@@ -9,13 +9,19 @@ go-ordfs-server/
 ├── cmd/
 │   └── server/
 │       └── main.go        # Entry point
-├── internal/
-│   ├── api/               # API handlers and routing
-│   ├── cache/             # Cache implementations (Redis)
-│   ├── config/            # Configuration management
-│   ├── handlers/          # HTTP request handlers
-│   ├── ordinals/          # Ordinal-related functionality
-│   └── txloader/          # Transaction loading utilities
+├── api/                   # API handlers and routing
+│   ├── server.go          # Server initialization
+│   └── routes.go          # Route definitions
+├── cache/                 # Cache implementations (Redis)
+├── config/                # Configuration management
+├── handlers/              # HTTP request handlers
+│   ├── content.go         # Content handling
+│   ├── dns.go             # DNS resolution
+│   ├── block.go           # Block handling
+│   ├── tx.go              # Transaction handling
+│   └── frontend.go        # Frontend handlers
+├── loader/                # Transaction loading utilities
+├── ordfs/                 # Ordinal-related functionality
 ├── frontend/              # Frontend templates and assets
 ├── docs/                  # Documentation (Swagger)
 ├── go.mod                 # Go module definition
@@ -23,14 +29,6 @@ go-ordfs-server/
 ├── .env.example           # Environment variable examples
 └── server.log             # Server log file
 ```
-
-## Features
-
-- **Ordinal File System Support**: Implements functionality for ordinal-based file storage and retrieval
-- **Modern Go Architecture**: Clean separation of concerns with proper package organization
-- **Cache Integration**: Redis-based caching for improved performance
-- **RESTful API**: Comprehensive HTTP API endpoints for file system operations
-- **Frontend Integration**: Template-based frontend with partials and modals
 
 ## Prerequisites
 
@@ -73,31 +71,35 @@ go build -o ordfs-server cmd/server/main.go
 ### Production Mode
 
 ```bash
-# Build for production
-go build -o ordfs-server cmd/server/main.go
+# Build and run using the build script
+./build.sh
 
-# Run the built binary
-./ordfs-server
+# Or build manually
+go build -o server.run ./cmd/server
+./server.run
 ```
 
 ## API Endpoints
 
-The server provides a comprehensive set of API endpoints for ordinal file system operations. The API is documented using Swagger at `/docs/swagger.yaml`.
+The server provides a comprehensive set of API endpoints for ordinal file system operations. The API is documented using Swagger at `/v1/docs/swagger.yaml`.
 
 ### Main Endpoints
 
-- `GET /content/:txidOrOutpoint` - Retrieve content by transaction ID or outpoint
-- `GET /content/pointer[:seq][/file/path]` - Resolve content through pointer resolution
-- `GET /block/:height` - Retrieve block information by height
-- `GET /tx/:txid` - Retrieve transaction information by ID
-- `GET /dns/:domain` - Resolve DNS records for ordinal domains
+- `GET /v1/content/*` - Retrieve content by transaction ID or outpoint
+- `GET /v1/content/pointer[:seq][/file/path]` - Resolve content through pointer resolution
+- `GET /v1/bsv/block/latest` - Retrieve latest block information
+- `GET /v1/bsv/block/height/:height` - Retrieve block information by height
+- `GET /v1/bsv/block/hash/:hash` - Retrieve block information by hash
+- `GET /v1/bsv/tx/:txid` - Retrieve transaction information by ID
+- `GET /v1/dns/:domain` - Resolve DNS records for ordinal domains
+- `GET /v1/health` - Health check endpoint
 
 ### Content Endpoint Parameters
 
 - `seq` - Sequence number for ordinal content (default: 0)
 - `map` - Include map data in response (default: false)
 - `out` - Include raw output data in response (default: false)
-- `head` - HEAD request to retrieve metadata only
+- `content` - Include content data in response (default: true)
 
 ### Cache Behavior
 

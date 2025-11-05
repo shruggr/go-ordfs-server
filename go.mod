@@ -3,6 +3,7 @@ module github.com/shruggr/go-ordfs-server
 go 1.25.3
 
 require (
+	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/b-open-io/overlay v0.3.1-0.20251029223636-861fd7c9ff6d
 	github.com/bitcoin-sv/go-templates v0.0.0-00010101000000-000000000000
 	github.com/bsv-blockchain/go-sdk v1.2.11
@@ -16,7 +17,6 @@ require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
-	github.com/alicebob/miniredis/v2 v2.35.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
@@ -46,4 +46,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/bitcoin-sv/go-templates => github.com/b-open-io/go-templates v0.0.0-20251101192731-1c507a0c0895
+replace github.com/bitcoin-sv/go-templates => ../go-templates

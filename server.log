@@ -5,14 +5,51 @@
  │               http://127.0.0.1:3000               │ 
  │       (bound on host 0.0.0.0 and port 3000)       │ 
  │                                                   │ 
- │ Handlers ............ 29  Processes ........... 1 │ 
- │ Prefork ....... Disabled  PID ............. 22435 │ 
+ │ Handlers ............ 31  Processes ........... 1 │ 
+ │ Prefork ....... Disabled  PID ............. 36749 │ 
  └───────────────────────────────────────────────────┘ 
 
-{"time":"2025-11-04T01:00:10.127888-05:00","level":"DEBUG","msg":"DNS GetRoot","hostname":"localhost:3000","ordfsHost":"","ordfsEnabled":false,"path":"/"}
-{"time":"2025-11-04T01:00:10.127949-05:00","level":"DEBUG","msg":"Rendering frontend index","hostname":"localhost:3000"}
-01:00:09 | 200 |    1.940917ms | 127.0.0.1 | GET | / | -
-01:00:09 | 404 |      140.25µs | 127.0.0.1 | GET | /.well-known/appspecific/com.chrome.devtools.json | -
-{"time":"2025-11-04T01:00:10.563922-05:00","level":"DEBUG","msg":"Resolve started","requestedOutpoint":"eb6f151ee52b5d65cb89481e89e76655e6af83f697f0af88b7ccf46e3174baaa_0","seq":null}
-01:00:10 | 200 |      703.25µs | 127.0.0.1 | GET | /eb6f151ee52b5d65cb89481e89e76655e6af83f697f0af88b7ccf46e3174baaa_0 | -
-01:00:10 | 200 |  185.339292ms | 127.0.0.1 | GET | /v1/bsv/block/latest | -
+{"time":"2025-11-05T11:38:00.77659-05:00","level":"DEBUG","msg":"DirectoryResolver.Resolve started","pointer":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0,"filePath":""}
+{"time":"2025-11-05T11:38:00.776766-05:00","level":"DEBUG","msg":"Resolved pointer to outpoint","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","isTxid":false}
+{"time":"2025-11-05T11:38:00.776783-05:00","level":"DEBUG","msg":"Loading content by outpoint","request":{"Outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9.2","Txid":null,"Seq":0,"Content":true,"Map":false,"Output":false,"Parent":true}}
+{"time":"2025-11-05T11:38:01.031578-05:00","level":"DEBUG","msg":"Resolve started","requestedOutpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0}
+{"time":"2025-11-05T11:38:01.031908-05:00","level":"DEBUG","msg":"Starting backward crawl","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:01.300291-05:00","level":"DEBUG","msg":"calculatePreviousOrdinalInput","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","txid":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9","outputIndex":2,"numOutputs":5,"numInputs":3,"ordinalOffset":5000001}
+{"time":"2025-11-05T11:38:01.476219-05:00","level":"DEBUG","msg":"Checking input","inputIndex":0,"prevOutpoint":"acacef2fac44cf1f2eff3297440ae48c3b5f5d248202f32dc979a3f9b8a64453_0","prevSatoshis":1,"cumulativeSats":0,"ordinalOffset":5000001}
+{"time":"2025-11-05T11:38:01.560676-05:00","level":"DEBUG","msg":"Checking input","inputIndex":1,"prevOutpoint":"acacef2fac44cf1f2eff3297440ae48c3b5f5d248202f32dc979a3f9b8a64453_4","prevSatoshis":141616,"cumulativeSats":1,"ordinalOffset":5000001}
+{"time":"2025-11-05T11:38:01.64243-05:00","level":"DEBUG","msg":"Checking input","inputIndex":2,"prevOutpoint":"a73d4d9b0e56fc02d90f8d0e7fa5d171b0da7a7a6de57b7236a35641de3f81bf_3","prevSatoshis":20960787,"cumulativeSats":141617,"ordinalOffset":5000001}
+{"time":"2025-11-05T11:38:01.642466-05:00","level":"DEBUG","msg":"Ordinal offset found within multi-sat input, this is the origin"}
+{"time":"2025-11-05T11:38:01.642472-05:00","level":"DEBUG","msg":"Found origin","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","depth":0}
+{"time":"2025-11-05T11:38:01.642501-05:00","level":"DEBUG","msg":"Migrating to origin","requestedOutpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","offset":0,"chainLength":1}
+{"time":"2025-11-05T11:38:01.642679-05:00","level":"DEBUG","msg":"Migration complete","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:01.642952-05:00","level":"DEBUG","msg":"Resolved origin and calculated target","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","requestedAbsoluteSeq":0,"relativeSeq":0,"targetAbsoluteSeq":0}
+{"time":"2025-11-05T11:38:01.643156-05:00","level":"DEBUG","msg":"Found cached target sequence","absoluteSeq":0,"outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:01.643365-05:00","level":"DEBUG","msg":"Resolve complete","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","current":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0,"hasContent":true,"hasMap":true}
+{"time":"2025-11-05T11:38:01.643631-05:00","level":"DEBUG","msg":"Parent origin not found, crawling","parentOutpoint":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0"}
+{"time":"2025-11-05T11:38:01.643649-05:00","level":"DEBUG","msg":"Starting backward crawl","outpoint":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0"}
+{"time":"2025-11-05T11:38:02.042247-05:00","level":"DEBUG","msg":"calculatePreviousOrdinalInput","outpoint":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","txid":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04","outputIndex":0,"numOutputs":2,"numInputs":1,"ordinalOffset":0}
+{"time":"2025-11-05T11:38:02.129232-05:00","level":"DEBUG","msg":"Checking input","inputIndex":0,"prevOutpoint":"489d815f0de7e05f247ccf506b427a26fe9a296b8ed739ce7477a8ef9e07459c_1","prevSatoshis":516,"cumulativeSats":0,"ordinalOffset":0}
+{"time":"2025-11-05T11:38:02.12927-05:00","level":"DEBUG","msg":"Found offset but not 1-sat","satoshis":516}
+{"time":"2025-11-05T11:38:02.129278-05:00","level":"DEBUG","msg":"Found origin","outpoint":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","depth":0}
+{"time":"2025-11-05T11:38:02.129284-05:00","level":"DEBUG","msg":"Migrating to origin","requestedOutpoint":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","origin":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","offset":0,"chainLength":1}
+{"time":"2025-11-05T11:38:02.129486-05:00","level":"DEBUG","msg":"Migration complete","origin":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0"}
+{"time":"2025-11-05T11:38:02.1302-05:00","level":"DEBUG","msg":"Starting forward crawl","origin":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","start":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","startSeq":0,"targetSeq":-1,"parentValidation":true}
+{"time":"2025-11-05T11:38:02.130934-05:00","level":"DEBUG","msg":"Forward crawl step","seq":0,"outpoint":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0","hasContent":true,"hasMap":true}
+{"time":"2025-11-05T11:38:02.131028-05:00","level":"DEBUG","msg":"Fetching spend from JungleBus","url":"https://junglebus.gorillapool.io/v1/txo/spend/f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0"}
+{"time":"2025-11-05T11:38:02.599188-05:00","level":"DEBUG","msg":"Found parent match during crawl","outpoint":"acacef2fac44cf1f2eff3297440ae48c3b5f5d248202f32dc979a3f9b8a64453_0"}
+{"time":"2025-11-05T11:38:02.599233-05:00","level":"DEBUG","msg":"Content loaded successfully","contentType":"image/svg+xml","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:02.599242-05:00","level":"DEBUG","msg":"sendContentResponse called","contentType":"image/svg+xml","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0,"map":""}
+11:38:00 | 200 |  1.822835666s | 127.0.0.1 | GET | /content/6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2:0 | -
+{"time":"2025-11-05T11:38:09.425617-05:00","level":"DEBUG","msg":"DirectoryResolver.Resolve started","pointer":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0,"filePath":""}
+{"time":"2025-11-05T11:38:09.425672-05:00","level":"DEBUG","msg":"Resolved pointer to outpoint","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","isTxid":false}
+{"time":"2025-11-05T11:38:09.425683-05:00","level":"DEBUG","msg":"Loading content by outpoint","request":{"Outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9.2","Txid":null,"Seq":0,"Content":true,"Map":false,"Output":false,"Parent":true}}
+{"time":"2025-11-05T11:38:09.425888-05:00","level":"DEBUG","msg":"Resolve started","requestedOutpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0}
+{"time":"2025-11-05T11:38:09.426019-05:00","level":"DEBUG","msg":"Found known origin","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:09.42612-05:00","level":"DEBUG","msg":"Resolved origin and calculated target","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","requestedAbsoluteSeq":0,"relativeSeq":0,"targetAbsoluteSeq":0}
+{"time":"2025-11-05T11:38:09.426232-05:00","level":"DEBUG","msg":"Found cached target sequence","absoluteSeq":0,"outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:09.426438-05:00","level":"DEBUG","msg":"Resolve complete","origin":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","current":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0,"hasContent":true,"hasMap":true}
+{"time":"2025-11-05T11:38:09.426844-05:00","level":"DEBUG","msg":"Parent validated via cached input origin","input":"acacef2fac44cf1f2eff3297440ae48c3b5f5d248202f32dc979a3f9b8a64453_0","parentOrigin":"f099182e168c0a30a9f97556d156c8b6284cfc3f76eca8352807b1ceff29da04_0"}
+{"time":"2025-11-05T11:38:09.426857-05:00","level":"DEBUG","msg":"Content loaded successfully","contentType":"image/svg+xml","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2"}
+{"time":"2025-11-05T11:38:09.426862-05:00","level":"DEBUG","msg":"sendContentResponse called","contentType":"image/svg+xml","outpoint":"6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2","seq":0,"map":""}
+11:38:08 | 200 |    1.262125ms | 127.0.0.1 | GET | /content/6235f4475fdfb7a89b55d5ca3fefedab72f0390d3a51a5d10eae3f3cc9f94ab9_2:0 | -
+signal: killed

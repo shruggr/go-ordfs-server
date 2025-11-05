@@ -4,29 +4,60 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/bitcoin-sv/go-templates/template/bitcom"
 	"github.com/bitcoin-sv/go-templates/template/inscription"
 	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
-	"github.com/redis/go-redis/v9"
-	"github.com/shruggr/go-ordfs-server/loader"
 )
 
 // parseOutput parses a transaction output for inscription or B protocol content
-func parseOutput(ctx context.Context, cache *redis.Client, outpoint *transaction.Outpoint, output *transaction.TransactionOutput) (string, []byte, map[string]string) {
+// Returns a Response with ContentType, Content, ContentSize, and Map populated
+// If loadContent is false, only metadata (contentType, contentLength, map) is loaded from cache
+func (o *Ordfs) parseOutput(ctx context.Context, outpoint *transaction.Outpoint, output *transaction.TransactionOutput, loadContent bool) *Response {
 	cacheKey := fmt.Sprintf("parsed:%s", outpoint.OrdinalString())
 
 	// Check cache first
-	cached := cache.HGetAll(ctx, cacheKey).Val()
-	if len(cached) > 0 {
-		contentType := cached["contentType"]
-		content := []byte(cached["content"])
-		var mapData map[string]string
-		if mapJSON := cached["map"]; mapJSON != "" {
-			json.Unmarshal([]byte(mapJSON), &mapData)
+	if loadContent {
+		cached := o.cache.HGetAll(ctx, cacheKey).Val()
+		if len(cached) > 0 {
+			contentType := cached["contentType"]
+			content := []byte(cached["content"])
+			mapJSON := cached["map"]
+			var parent *transaction.Outpoint
+			if cached["parent"] != "" {
+				parent, _ = transaction.OutpointFromString(cached["parent"])
+			}
+			return &Response{
+				ContentType:   contentType,
+				Content:       content,
+				ContentLength: len(content),
+				Map:           mapJSON,
+				Parent:        parent,
+			}
 		}
-		return contentType, content, mapData
+	} else {
+		// Only fetch metadata fields, not full content
+		var cached map[string]string
+		if err := o.cache.HMGet(ctx, cacheKey, "parsed", "contentType", "contentLength", "map", "parent").Scan(&cached); err == nil && len(cached) > 0 {
+			var contentLength int
+			if cached["contentLength"] != "" {
+				contentLength, _ = strconv.Atoi(cached["contentLength"])
+			}
+			var parent *transaction.Outpoint
+			if cached["parent"] != "" {
+				parent, _ = transaction.OutpointFromString(cached["parent"])
+			}
+
+			return &Response{
+				ContentType:   cached["contentType"],
+				Content:       nil,
+				ContentLength: contentLength,
+				Map:           cached["map"],
+				Parent:        parent,
+			}
+		}
 	}
 
 	lockingScript := script.Script(*output.LockingScript)
@@ -34,6 +65,7 @@ func parseOutput(ctx context.Context, cache *redis.Client, outpoint *transaction
 	var contentType string
 	var content []byte
 	var mapData map[string]string
+	var parent *transaction.Outpoint
 
 	// Try inscription first
 	if insc := inscription.Decode(&lockingScript); insc != nil {
@@ -43,6 +75,11 @@ func parseOutput(ctx context.Context, cache *redis.Client, outpoint *transaction
 				contentType = "application/octet-stream"
 			}
 			content = insc.File.Content
+		}
+
+		// Extract parent if present
+		if insc.Parent != nil {
+			parent = insc.Parent
 		}
 
 		// Check for map data in inscription fields
@@ -88,32 +125,43 @@ func parseOutput(ctx context.Context, cache *redis.Client, outpoint *transaction
 		}
 	}
 
-	// Cache the result if we found anything
-	if contentType != "" || len(mapData) > 0 {
-		cacheData := map[string]interface{}{}
-		if contentType != "" {
-			cacheData["contentType"] = contentType
-			cacheData["content"] = string(content)
-		}
-		if mapData != nil {
-			if mapJSON, err := json.Marshal(mapData); err == nil {
-				cacheData["map"] = string(mapJSON)
-			}
-		}
-		cache.HSet(ctx, cacheKey, cacheData)
-		cache.Expire(ctx, cacheKey, cacheTTL)
+	// Cache the result - always cache to mark as parsed
+	cacheData := map[string]interface{}{
+		"parsed": "1",
 	}
+	var mapJSON string
+	if contentType != "" {
+		cacheData["contentType"] = contentType
+		cacheData["content"] = string(content)
+		cacheData["contentLength"] = len(content)
+	}
+	if mapData != nil {
+		if mapBytes, err := json.Marshal(mapData); err == nil {
+			mapJSON = string(mapBytes)
+			cacheData["map"] = mapJSON
+		}
+	}
+	if parent != nil {
+		cacheData["parent"] = parent.OrdinalString()
+	}
+	o.cache.HSet(ctx, cacheKey, cacheData)
+	o.cache.Expire(ctx, cacheKey, cacheTTL)
 
-	return contentType, content, mapData
+	return &Response{
+		ContentType:   contentType,
+		Content:       content,
+		ContentLength: len(content),
+		Map:           mapJSON,
+		Parent:        parent,
+	}
 }
 
 // loadAndParse loads an output and parses it for content
-func loadAndParse(ctx context.Context, cache *redis.Client, ldr loader.Loader, outpoint *transaction.Outpoint) (string, []byte, map[string]string, error) {
-	output, err := ldr.LoadOutput(ctx, outpoint)
+func (o *Ordfs) loadAndParse(ctx context.Context, outpoint *transaction.Outpoint, loadContent bool) (*Response, error) {
+	output, err := o.loader.LoadOutput(ctx, outpoint)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("failed to load output: %w", err)
+		return nil, fmt.Errorf("failed to load output: %w", err)
 	}
 
-	contentType, content, mapData := parseOutput(ctx, cache, outpoint, output)
-	return contentType, content, mapData, nil
+	return o.parseOutput(ctx, outpoint, output, loadContent), nil
 }

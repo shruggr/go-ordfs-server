@@ -116,7 +116,7 @@ func TestForwardCrawl(t *testing.T) {
 	t.Run("1.1: Resolve origin (seq=0)", func(t *testing.T) {
 		outpoint, _ := transaction.OutpointFromString(origin)
 
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(0))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 0)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -141,7 +141,7 @@ func TestForwardCrawl(t *testing.T) {
 	t.Run("1.2: Resolve seq=1 (partial forward crawl)", func(t *testing.T) {
 		outpoint, _ := transaction.OutpointFromString(origin)
 
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(1))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 1)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -168,7 +168,7 @@ func TestForwardCrawl(t *testing.T) {
 	t.Run("1.3: Resolve seq=-1 (full forward crawl to latest)", func(t *testing.T) {
 		outpoint, _ := transaction.OutpointFromString(origin)
 
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(-1))
+		resolution, err := ordfs.Resolve(ctx, outpoint, -1)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -194,38 +194,47 @@ func TestForwardCrawl(t *testing.T) {
 	})
 }
 
-// Scenario 2: No Sequence (seq=nil)
-func TestNoSequence(t *testing.T) {
-	_, redisClient, ordfs := setupTestChain(t)
+// Scenario 2: Direct Outpoint (no sequence traversal when seq=nil)
+func TestDirectOutpoint(t *testing.T) {
+	mr := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: mr.Addr(),
+	})
 	defer redisClient.Close()
+
+	ldr := newMockLoader()
+	ordfs := New(ldr, redisClient)
 	ctx := context.Background()
 
-	t.Run("2.1: Request transaction with no seq parameter", func(t *testing.T) {
-		outpoint, _ := transaction.OutpointFromString(seq2)
+	t.Run("2.1: Request transaction directly (seq=nil)", func(t *testing.T) {
+		// Use an outpoint with actual inscription content
+		directOutpoint := "e496b2984a6b780a453559125540ec1e1c99154cdbc1cef2d2f6bea37d6dedd9_0"
+		outpoint, _ := transaction.OutpointFromString(directOutpoint)
 
-		resolution, err := ordfs.Resolve(ctx, outpoint, nil)
+		resp, err := ordfs.Load(ctx, &Request{
+			Outpoint: outpoint,
+			Seq:      nil, // No seq specified - should treat as direct outpoint
+			Content:  true,
+			Map:      true,
+		})
 		if err != nil {
-			t.Fatalf("Resolve failed: %v", err)
+			t.Fatalf("Load failed: %v", err)
 		}
 
-		if resolution.Origin.OrdinalString() != seq2 {
-			t.Errorf("Expected origin %s (self), got %s", seq2, resolution.Origin.OrdinalString())
+		if resp.Outpoint.OrdinalString() != directOutpoint {
+			t.Errorf("Expected outpoint %s (self), got %s", directOutpoint, resp.Outpoint.OrdinalString())
 		}
 
-		if resolution.Current.OrdinalString() != seq2 {
-			t.Errorf("Expected current %s (self), got %s", seq2, resolution.Current.OrdinalString())
+		if resp.Sequence != 0 {
+			t.Errorf("Expected sequence 0, got %d", resp.Sequence)
 		}
 
-		if resolution.Sequence != 0 {
-			t.Errorf("Expected sequence 0, got %d", resolution.Sequence)
+		if resp.ContentType == "" {
+			t.Error("Expected content to be loaded from inscription")
 		}
 
-		if resolution.Content.OrdinalString() != seq2 {
-			t.Errorf("Expected content from self %s, got %s", seq2, resolution.Content.OrdinalString())
-		}
-
-		if resolution.Map.OrdinalString() != seq2 {
-			t.Errorf("Expected map from self %s, got %s", seq2, resolution.Map.OrdinalString())
+		if len(resp.Content) == 0 {
+			t.Error("Expected content data to be present")
 		}
 	})
 }
@@ -240,7 +249,7 @@ func TestBackwardCrawl(t *testing.T) {
 		// Start from seq 2 outpoint, request seq 0
 		outpoint, _ := transaction.OutpointFromString(seq2)
 
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(0))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 0)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -268,7 +277,7 @@ func TestBackwardCrawl(t *testing.T) {
 		// Origin should be cached from 2.1
 		outpoint, _ := transaction.OutpointFromString(seq2)
 
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(1))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 1)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -293,7 +302,7 @@ func TestCacheHits(t *testing.T) {
 		outpoint, _ := transaction.OutpointFromString(origin)
 
 		// First request
-		_, err := ordfs.Resolve(ctx, outpoint, intPtr(1))
+		_, err := ordfs.Resolve(ctx, outpoint, 1)
 		if err != nil {
 			t.Fatalf("First resolve failed: %v", err)
 		}
@@ -310,7 +319,7 @@ func TestCacheHits(t *testing.T) {
 		}
 
 		// Second request should use cache
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(1))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 1)
 		if err != nil {
 			t.Fatalf("Second resolve failed: %v", err)
 		}
@@ -329,10 +338,10 @@ func TestSpecificSequences(t *testing.T) {
 
 	// Populate cache with scenario 1 first
 	outpoint, _ := transaction.OutpointFromString(origin)
-	ordfs.Resolve(ctx, outpoint, intPtr(-1))
+	ordfs.Resolve(ctx, outpoint, -1)
 
 	t.Run("4.1: Request seq=2 from origin", func(t *testing.T) {
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(2))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 2)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -347,7 +356,7 @@ func TestSpecificSequences(t *testing.T) {
 	})
 
 	t.Run("4.2: Request seq=3 from origin", func(t *testing.T) {
-		resolution, err := ordfs.Resolve(ctx, outpoint, intPtr(3))
+		resolution, err := ordfs.Resolve(ctx, outpoint, 3)
 		if err != nil {
 			t.Fatalf("Resolve failed: %v", err)
 		}
@@ -371,7 +380,7 @@ func TestErrorCases(t *testing.T) {
 	t.Run("7.1: Sequence beyond chain end", func(t *testing.T) {
 		outpoint, _ := transaction.OutpointFromString(origin)
 
-		_, err := ordfs.Resolve(ctx, outpoint, intPtr(10))
+		_, err := ordfs.Resolve(ctx, outpoint, 10)
 		if err == nil {
 			t.Error("Expected error for sequence beyond chain end")
 		}
@@ -380,7 +389,7 @@ func TestErrorCases(t *testing.T) {
 	t.Run("7.2: Non-existent outpoint", func(t *testing.T) {
 		outpoint, _ := transaction.OutpointFromString("deadbeef00000000000000000000000000000000000000000000000000000000_0")
 
-		_, err := ordfs.Resolve(ctx, outpoint, intPtr(0))
+		_, err := ordfs.Resolve(ctx, outpoint, 0)
 		if err == nil {
 			t.Error("Expected error for non-existent outpoint")
 		}

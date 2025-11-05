@@ -37,3 +37,21 @@ func (h *TxHandler) GetRawTx(c *fiber.Ctx) error {
 	c.Set("Content-Type", "application/octet-stream")
 	return c.Send(tx.Bytes())
 }
+
+func (h *TxHandler) GetMerkleProof(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented yet",
+	})
+}
+
+func (h *TxHandler) GetBeef(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented yet",
+	})
+}
+
+func (h *TxHandler) GetOutput(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented yet",
+	})
+}

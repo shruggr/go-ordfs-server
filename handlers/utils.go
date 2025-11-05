@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,12 @@ import (
 )
 
 func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq int) error {
+	slog.Debug("sendContentResponse called",
+		"contentType", resp.ContentType,
+		"outpoint", resp.Outpoint.OrdinalString(),
+		"seq", seq,
+		"map", resp.Map)
+
 	c.Set("Content-Type", resp.ContentType)
 	c.Set("X-Outpoint", resp.Outpoint.OrdinalString())
 
@@ -31,10 +38,12 @@ func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq int) error {
 		c.Set("Cache-Control", "public, max-age=86400, immutable")
 	}
 
-	if len(resp.Map) > 0 {
-		if mapJSON, err := json.Marshal(resp.Map); err == nil {
-			c.Set("X-Map", string(mapJSON))
-		}
+	if resp.Map != "" {
+		c.Set("X-Map", resp.Map)
+	}
+
+	if resp.Parent != nil {
+		c.Set("X-Parent", resp.Parent.OrdinalString())
 	}
 
 	if c.QueryBool("out", false) && len(resp.Output) > 0 {
@@ -42,6 +51,9 @@ func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq int) error {
 	}
 
 	if c.Method() == fiber.MethodHead {
+		if resp.ContentLength > 0 {
+			c.Set("Content-Length", fmt.Sprintf("%d", resp.ContentLength))
+		}
 		return nil
 	}
 
@@ -151,7 +163,17 @@ func NewDirectoryResolver(ordfsInstance *ordfs.Ordfs) *DirectoryResolver {
 //   - If filePath is empty and raw=false, redirects to index.html
 //   - If filePath matches a file in directory, loads and returns that file
 //   - If filePath doesn't match (SPA fallback), loads and returns index.html
-func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer string, seq int, filePath string) error {
+func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer string, seq *int, filePath string) error {
+	if seq == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "seq parameter is required",
+		})
+	}
+	slog.Debug("DirectoryResolver.Resolve started",
+		"pointer", pointer,
+		"seq", seq,
+		"filePath", filePath)
+
 	// Determine if pointer is txid or outpoint
 	outpoint, isTxid, err := resolvePointerToOutpoint(pointer)
 	if err != nil {
@@ -160,27 +182,40 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 		})
 	}
 
-	// Override seq from query string if present
-	if c.Query("seq") != "" {
-		if querySeq, err := strconv.Atoi(c.Query("seq")); err == nil {
-			seq = querySeq
-		}
-	}
+	slog.Debug("Resolved pointer to outpoint",
+		"outpoint", outpoint.OrdinalString(),
+		"isTxid", isTxid)
+
+	// seq is already a pointer, use it directly
 
 	// Load the content at pointer
 	var resp *ordfs.Response
 	if isTxid {
 		req := &ordfs.Request{
 			Txid:    &outpoint.Txid,
-			Content: true,
-			Output:  true,
+			Seq:     seq,
+			Content: c.QueryBool("content", true),
+			Map:     c.QueryBool("map", false),
+			Output:  c.QueryBool("out", false),
+			Parent:  c.QueryBool("parent", false),
 		}
+		slog.Debug("Loading content by txid", "request", req)
 		resp, err = r.ordfs.Load(ctx, req)
 	} else {
-		resp, err = r.ordfs.Load(ctx, buildRequestFromQuery(c, outpoint))
+		req := &ordfs.Request{
+			Outpoint: outpoint,
+			Seq:      seq,
+			Content:  c.QueryBool("content", true),
+			Map:      c.QueryBool("map", false),
+			Output:   c.QueryBool("out", false),
+			Parent:   c.QueryBool("parent", false),
+		}
+		slog.Debug("Loading content by outpoint", "request", req)
+		resp, err = r.ordfs.Load(ctx, req)
 	}
 
 	if err != nil {
+		slog.Error("Failed to load content", "error", err)
 		if errors.Is(err, loader.ErrNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"error": "inscription not found",
@@ -191,9 +226,13 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 		})
 	}
 
+	slog.Debug("Content loaded successfully",
+		"contentType", resp.ContentType,
+		"outpoint", resp.Outpoint.OrdinalString())
+
 	// If not a directory, serve content directly (ignore file path)
 	if resp.ContentType != "ord-fs/json" {
-		return sendContentResponse(c, resp, seq)
+		return sendContentResponse(c, resp, *seq)
 	}
 
 	// It's a directory - handle directory logic
@@ -207,7 +246,7 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 	// No file path provided - redirect to index.html (unless raw)
 	if filePath == "" {
 		if c.Query("raw") != "" {
-			return sendContentResponse(c, resp, seq)
+			return sendContentResponse(c, resp, *seq)
 		}
 		// Construct redirect URL with pointer
 		redirectURL := fmt.Sprintf("%s/index.html", c.Path())
@@ -240,12 +279,19 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 	if isTxid {
 		req := &ordfs.Request{
 			Txid:    &fileOutpoint.Txid,
-			Content: true,
-			Output:  true,
+			Content: c.QueryBool("content", true),
+			Map:     c.QueryBool("map", false),
+			Output:  c.QueryBool("out", false),
 		}
 		fileResp, err = r.ordfs.Load(ctx, req)
 	} else {
-		fileResp, err = r.ordfs.Load(ctx, buildRequestFromQuery(c, fileOutpoint))
+		req := &ordfs.Request{
+			Outpoint: fileOutpoint,
+			Content:  c.QueryBool("content", true),
+			Map:      c.QueryBool("map", false),
+			Output:   c.QueryBool("out", false),
+		}
+		fileResp, err = r.ordfs.Load(ctx, req)
 	}
 
 	if err != nil {

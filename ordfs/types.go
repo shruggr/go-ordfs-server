@@ -10,6 +10,7 @@ type ChainEntry struct {
 	RelativeSeq     int
 	ContentOutpoint *transaction.Outpoint
 	MapOutpoint     *transaction.Outpoint
+	ParentOutpoint  *transaction.Outpoint
 }
 
 type Request struct {
@@ -19,6 +20,7 @@ type Request struct {
 	Content  bool
 	Map      bool
 	Output   bool
+	Parent   bool
 }
 
 type Resolution struct {
@@ -26,6 +28,7 @@ type Resolution struct {
 	Current  *transaction.Outpoint
 	Content  *transaction.Outpoint
 	Map      *transaction.Outpoint
+	Parent   *transaction.Outpoint
 	Sequence int
 }
 
@@ -35,15 +38,32 @@ type LoadRequest struct {
 	Content  *transaction.Outpoint
 	Map      *transaction.Outpoint
 	Output   *transaction.Outpoint
-	Sequence int
+	Parent   *transaction.Outpoint
+	Sequence *int
 }
 
 type Response struct {
+	Outpoint      *transaction.Outpoint
+	Origin        *transaction.Outpoint
+	ContentType   string
+	Content       []byte
+	ContentLength int
+	Map           string // JSON string
+	Sequence      int
+	Output        []byte
+	Parent        *transaction.Outpoint
+}
+
+type ForwardCrawlRequest struct {
+	Origin          *transaction.Outpoint
+	StartOutpoint   *transaction.Outpoint
+	StartSeq        int
+	TargetSeq       int
+	ParentOutpoints map[string]bool
+}
+
+type ForwardCrawlResponse struct {
 	Outpoint    *transaction.Outpoint
-	Origin      *transaction.Outpoint
-	ContentType string
-	Content     []byte
-	Map         map[string]string
 	Sequence    int
-	Output      []byte
+	ParentFound bool
 }

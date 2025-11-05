@@ -182,38 +182,30 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
-  /content/{txidOrOutpoint}:
+  /content/{locator}:
     get:
       summary: Get inscription content
       description: |
         Returns inscription or B protocol content.
 
-        Supports:
-        - Transaction ID (64 hex chars) - returns first inscription found
-        - Outpoint format (txid_vout) - returns content at specific output
-        - Sequence parameter for ordinal tracking
-        - MAP protocol metadata extraction
+        Supports MAP protocol metadata extraction and ordinal sequence tracking.
       operationId: getContent
       tags:
         - Content
       parameters:
-        - name: txidOrOutpoint
+        - name: locator
           in: path
           required: true
-          description: Transaction ID or outpoint (txid_vout format)
+          description: |
+            Content locator in one of these formats:
+            - `txid` - 64 hex characters, returns first inscription in transaction
+            - `txid_vout` - Outpoint format, returns content at specific output
+            - `txid_vout:seq` - Outpoint with sequence number (relative to the specified outpoint)
+              - `:0` = content at this specific outpoint
+              - `:N` = content N spends forward from this outpoint
+              - `:-1` = latest version (follows spend chain to current unspent location)
           schema:
             type: string
-        - name: seq
-          in: query
-          required: false
-          description: |
-            Ordinal sequence to retrieve (only applies to outpoints):
-            - 0 = first inscription (default)
-            - N = Nth reinscription
-            - -1 = latest sequence (last unspent location)
-          schema:
-            type: integer
-            default: 0
         - name: map
           in: query
           required: false
@@ -223,7 +215,18 @@ paths:
             using last-write-wins semantics.
           schema:
             type: boolean
-            default: false
+        - name: content
+          in: query
+          required: false
+          description: Whether to return content body
+          schema:
+            type: boolean
+        - name: out
+          in: query
+          required: false
+          description: Include base64-encoded output script in X-Output header
+          schema:
+            type: boolean
       responses:
         '200':
           description: Content with appropriate content type
@@ -235,7 +238,15 @@ paths:
             X-Outpoint:
               schema:
                 type: string
-              description: Resolved outpoint for the content
+              description: Current outpoint of the ordinal satoshi (txid_vout format)
+            X-Origin:
+              schema:
+                type: string
+              description: Origin outpoint where the ordinal satoshi was created
+            X-Ord-Seq:
+              schema:
+                type: string
+              description: Sequence number indicating how many inscription revisions exist at this outpoint
             X-Map:
               schema:
                 type: string
@@ -243,12 +254,16 @@ paths:
                 JSON-encoded MAP protocol metadata (only present if map=true).
                 Contains merged key-value pairs from all MAP SET commands
                 encountered in the spend chain.
+            X-Output:
+              schema:
+                type: string
+              description: Base64-encoded output script (only present if out=true)
             Cache-Control:
               schema:
                 type: string
               description: |
                 Caching directive:
-                - seq=-1: "public, max-age=60" (latest sequence, short cache)
+                - seq=-1: "no-cache, no-store, must-revalidate" (latest sequence, no cache)
                 - seq>=0: "public, max-age=86400, immutable" (specific sequence, long cache)
           content:
             '*/*':
@@ -261,29 +276,150 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    head:
+      summary: Get content metadata without body
+      description: |
+        Returns the same headers as GET but without the response body.
+        This is the preferred method for querying metadata (content type, outpoint, origin, sequence)
+        without downloading the actual content.
+      operationId: headContent
+      tags:
+        - Content
+      parameters:
+        - name: locator
+          in: path
+          required: true
+          description: |
+            Content locator in one of these formats:
+            - `txid` - 64 hex characters, returns first inscription in transaction
+            - `txid_vout` - Outpoint format, returns content at specific output
+            - `txid_vout:seq` - Outpoint with sequence number (relative to the specified outpoint)
+              - `:0` = content at this specific outpoint
+              - `:N` = content N spends forward from this outpoint
+              - `:-1` = latest version (follows spend chain to current unspent location)
+          schema:
+            type: string
+        - name: map
+          in: query
+          required: false
+          description: |
+            Include merged MAP protocol metadata in X-Map header.
+            MAP data is merged across all spends up to the requested version
+            using last-write-wins semantics.
+          schema:
+            type: boolean
+        - name: out
+          in: query
+          required: false
+          description: Include base64-encoded output script in X-Output header
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Metadata headers with no body
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of the content
+            Content-Length:
+              schema:
+                type: integer
+              description: Size of the content in bytes
+            X-Outpoint:
+              schema:
+                type: string
+              description: Current outpoint of the ordinal satoshi (txid_vout format)
+            X-Origin:
+              schema:
+                type: string
+              description: Origin outpoint where the ordinal satoshi was created
+            X-Ord-Seq:
+              schema:
+                type: string
+              description: Sequence number indicating how many inscription revisions exist at this outpoint
+            X-Map:
+              schema:
+                type: string
+              description: |
+                JSON-encoded MAP protocol metadata (only present if map=true).
+                Contains merged key-value pairs from all MAP SET commands
+                encountered in the spend chain.
+            X-Output:
+              schema:
+                type: string
+              description: Base64-encoded output script (only present if out=true)
+            Cache-Control:
+              schema:
+                type: string
+              description: |
+                Caching directive:
+                - seq=-1: "no-cache, no-store, must-revalidate" (latest sequence, no cache)
+                - seq>=0: "public, max-age=86400, immutable" (specific sequence, long cache)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
-  /content/{pointer}/{filename}:
+  /content/{locator}/{filename}:
     get:
       summary: Get file from OrdFS directory
       description: |
         Loads an OrdFS directory and returns a specific file.
-        Directory must be a JSON inscription mapping filenames to ord:// pointers.
+        Directory must be a JSON inscription mapping filenames to ord:// locators.
+
+        Supports SPA fallback - if file not found, returns index.html.
+        If no filename provided and directory detected, redirects to index.html (unless raw=true).
       operationId: getDirectoryFile
       tags:
         - Content
       parameters:
-        - name: pointer
+        - name: locator
           in: path
           required: true
-          description: Directory pointer (txid or outpoint)
+          description: |
+            Directory locator in one of these formats:
+            - `txid` - 64 hex characters
+            - `txid_vout` - Outpoint format
+            - `txid_vout:seq` - Outpoint with sequence number (relative to the specified outpoint)
+              - `:0` = content at this specific outpoint
+              - `:N` = content N spends forward from this outpoint
+              - `:-1` = latest version (follows spend chain to current unspent location)
           schema:
             type: string
         - name: filename
           in: path
           required: true
-          description: Filename to retrieve from directory
+          description: Filename to retrieve from directory (if not found, falls back to index.html)
           schema:
             type: string
+            example: "style.css"
+        - name: raw
+          in: query
+          required: false
+          description: If set, prevents redirect to index.html for directory content
+          schema:
+            type: string
+        - name: map
+          in: query
+          required: false
+          description: Include MAP protocol metadata in X-Map header
+          schema:
+            type: boolean
+        - name: content
+          in: query
+          required: false
+          description: Whether to return content body
+          schema:
+            type: boolean
+        - name: out
+          in: query
+          required: false
+          description: Include base64-encoded output script in X-Output header
+          schema:
+            type: boolean
       responses:
         '200':
           description: File content with appropriate content type
@@ -296,11 +432,33 @@ paths:
               schema:
                 type: string
               description: Resolved outpoint for the file
+            X-Origin:
+              schema:
+                type: string
+              description: Origin outpoint where the ordinal satoshi was created
+            X-Ord-Seq:
+              schema:
+                type: string
+              description: Ordinal sequence number of this file
+            X-Map:
+              schema:
+                type: string
+              description: JSON-encoded MAP protocol metadata (if map=true)
+            X-Output:
+              schema:
+                type: string
+              description: Base64-encoded output script (if out=true)
+            Cache-Control:
+              schema:
+                type: string
+              description: Caching directive
           content:
             '*/*':
               schema:
                 type: string
                 format: binary
+        '302':
+          description: Redirect to index.html for directory without filename
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -313,41 +471,109 @@ paths:
       summary: Root endpoint with DNS routing
       description: |
         Returns content based on DNS TXT record for custom domains.
-        If no DNS configuration found, returns "OrdFS Server".
+        If canonical host or no DNS configuration, returns frontend index page.
 
         DNS TXT record format: _ordfs.yourdomain.com → ordfs=<outpoint>[:seq]
+
+        If content is ord-fs/json directory, redirects to /index.html (unless raw=true).
       operationId: getRoot
       tags:
         - DNS
+      parameters:
+        - name: raw
+          in: query
+          required: false
+          description: If set, prevents redirect to index.html for directory content
+          schema:
+            type: string
+        - name: map
+          in: query
+          required: false
+          description: Include MAP protocol metadata in X-Map header
+          schema:
+            type: boolean
+        - name: content
+          in: query
+          required: false
+          description: Whether to return content body
+          schema:
+            type: boolean
+        - name: out
+          in: query
+          required: false
+          description: Include base64-encoded output script in X-Output header
+          schema:
+            type: boolean
       responses:
         '200':
-          description: Content or server status
+          description: Content or frontend page
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of the content
+            X-Outpoint:
+              schema:
+                type: string
+              description: Resolved outpoint (for inscription content)
+            X-Origin:
+              schema:
+                type: string
+              description: Origin outpoint where the ordinal satoshi was created
+            X-Ord-Seq:
+              schema:
+                type: string
+              description: Ordinal sequence number (for inscription content)
+            X-Map:
+              schema:
+                type: string
+              description: JSON-encoded MAP protocol metadata (if map=true)
+            X-Output:
+              schema:
+                type: string
+              description: Base64-encoded output script (if out=true)
+            Cache-Control:
+              schema:
+                type: string
+              description: Caching directive (for inscription content)
           content:
             '*/*':
               schema:
                 type: string
+        '302':
+          description: Redirect to /index.html for directory content
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /{fileOrPointer}:
+  /{locator}:
     get:
       summary: Smart route for inscription or DNS file
       description: |
-        Attempts to:
-        1. Load as inscription/outpoint
-        2. If not found and DNS enabled, load from DNS directory
+        Multi-purpose catch-all endpoint with priority order:
+        1. Try to parse as valid inscription locator (txid, outpoint, or with :seq suffix)
+        2. If valid locator found, load content directly
+        3. If not valid locator and DNS enabled, lookup domain's DNS TXT record
+        4. Load file from DNS-configured directory
 
-        Supports ord-fs/json redirect to index.html
-      operationId: getFileOrPointer
+        Supports ord-fs/json redirect to index.html (unless raw=true).
+      operationId: getFileOrLocator
       tags:
         - DNS
       parameters:
-        - name: fileOrPointer
+        - name: locator
           in: path
           required: true
-          description: File name or inscription pointer
+          description: |
+            Content locator or filename:
+            - `txid` - 64 hex characters
+            - `txid_vout` - Outpoint format
+            - `txid_vout:seq` - Outpoint with sequence number (relative to the specified outpoint)
+              - `:0` = content at this specific outpoint
+              - `:N` = content N spends forward from this outpoint
+              - `:-1` = latest version (follows spend chain to current unspent location)
+            - `filename.ext` - File name (DNS routing only)
           schema:
             type: string
         - name: raw
@@ -356,9 +582,56 @@ paths:
           description: If set, prevents redirect for ord-fs/json content
           schema:
             type: string
+        - name: map
+          in: query
+          required: false
+          description: Include MAP protocol metadata in X-Map header
+          schema:
+            type: boolean
+        - name: content
+          in: query
+          required: false
+          description: Whether to return content body
+          schema:
+            type: boolean
+        - name: out
+          in: query
+          required: false
+          description: Include base64-encoded output script in X-Output header
+          schema:
+            type: boolean
       responses:
         '200':
           description: Content with appropriate content type
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of the content
+            X-Outpoint:
+              schema:
+                type: string
+              description: Resolved outpoint for the content
+            X-Origin:
+              schema:
+                type: string
+              description: Origin outpoint where the ordinal satoshi was created
+            X-Ord-Seq:
+              schema:
+                type: string
+              description: Ordinal sequence number
+            X-Map:
+              schema:
+                type: string
+              description: JSON-encoded MAP protocol metadata (if map=true)
+            X-Output:
+              schema:
+                type: string
+              description: Base64-encoded output script (if out=true)
+            Cache-Control:
+              schema:
+                type: string
+              description: Caching directive
           content:
             '*/*':
               schema:
@@ -371,34 +644,95 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /{pointer}/{filename}:
+  /{locator}/{filename}:
     get:
-      summary: Get file from directory (alias)
-      description: Alternative route for directory file access
+      summary: Get file from directory (catch-all)
+      description: |
+        Catch-all route that handles directory file access with flexible locator formats.
+        Supports both direct locator access and DNS-based routing.
+
+        Locator can include :seq suffix for versioning.
+        Implements SPA fallback to index.html if file not found.
       operationId: getFile
       tags:
-        - Content
+        - DNS
       parameters:
-        - name: pointer
+        - name: locator
           in: path
           required: true
-          description: Directory pointer
+          description: |
+            Directory locator or path segment:
+            - `txid` - 64 hex characters
+            - `txid_vout` - Outpoint format
+            - `txid_vout:seq` - Outpoint with sequence number (relative to the specified outpoint)
+              - `:0` = content at this specific outpoint
+              - `:N` = content N spends forward from this outpoint
+              - `:-1` = latest version (follows spend chain to current unspent location)
+            - Path segment (DNS routing only)
           schema:
             type: string
         - name: filename
           in: path
           required: true
-          description: Filename to retrieve
+          description: Filename to retrieve (falls back to index.html if not found)
           schema:
             type: string
+        - name: raw
+          in: query
+          required: false
+          description: Prevents redirect for directory content
+          schema:
+            type: string
+        - name: map
+          in: query
+          required: false
+          description: Include MAP protocol metadata in X-Map header
+          schema:
+            type: boolean
+        - name: content
+          in: query
+          required: false
+          description: Whether to return content body
+          schema:
+            type: boolean
+        - name: out
+          in: query
+          required: false
+          description: Include base64-encoded output script in X-Output header
+          schema:
+            type: boolean
       responses:
         '200':
           description: File content
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            X-Outpoint:
+              schema:
+                type: string
+            X-Origin:
+              schema:
+                type: string
+            X-Ord-Seq:
+              schema:
+                type: string
+            X-Map:
+              schema:
+                type: string
+            X-Output:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
           content:
             '*/*':
               schema:
                 type: string
                 format: binary
+        '302':
+          description: Redirect to index.html
         '404':
           $ref: '#/components/responses/NotFound'
 

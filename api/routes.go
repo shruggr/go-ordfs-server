@@ -29,6 +29,12 @@ func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockH
 	app.Get("/v1/bsv/block/hash/:hash", blockHandler.GetByHash)
 	app.Get("/v1/bsv/tx/:txid", txHandler.GetRawTx)
 
+	// V2 transaction endpoints
+	app.Get("/v2/tx/:txid", txHandler.GetRawTx)
+	app.Get("/v2/tx/:txid/proof", txHandler.GetMerkleProof)
+	app.Get("/v2/tx/:txid/beef", txHandler.GetBeef)
+	app.Get("/v2/tx/:txid/:outputIndex", txHandler.GetOutput)
+
 	app.Get("/preview/:b64HtmlData", frontendHandler.RenderPreview)
 	app.Post("/preview", frontendHandler.RenderPreviewPost)
 
