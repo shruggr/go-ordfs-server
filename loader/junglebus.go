@@ -249,3 +249,68 @@ func (l *JungleBusLoader) loadRemoteRawtx(ctx context.Context, txid string) ([]b
 
 	return rawtx, nil
 }
+
+func (l *JungleBusLoader) LoadHeaderByHash(ctx context.Context, hash string) ([]byte, error) {
+	cacheKey := "blockheader:" + hash
+
+	if header, err := l.cache.Get(ctx, cacheKey).Bytes(); err == nil && len(header) > 0 {
+		return header, nil
+	}
+
+	url := fmt.Sprintf("%s/v1/block_header/get/%s/bin", l.junglebusURL, hash)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		slog.Debug("Block header not found in JungleBus", "hash", hash)
+		return nil, ErrNotFound
+	}
+
+	if resp.StatusCode != 200 {
+		slog.Debug("JungleBus error fetching block header", "hash", hash, "status", resp.StatusCode)
+		return nil, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
+	}
+
+	header, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	l.cache.Set(ctx, cacheKey, header, cacheTTL)
+
+	return header, nil
+}
+
+func (l *JungleBusLoader) LoadHeaderByHeight(ctx context.Context, height uint32) ([]byte, uint32, error) {
+	url := fmt.Sprintf("%s/v1/block_header/get/%d/bin", l.junglebusURL, height)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		slog.Debug("Block header not found in JungleBus", "height", height)
+		return nil, 0, ErrNotFound
+	}
+
+	if resp.StatusCode != 200 {
+		slog.Debug("JungleBus error fetching block header", "height", height, "status", resp.StatusCode)
+		return nil, 0, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
+	}
+
+	header, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// TODO: Determine current chain tip height to calculate depth
+	// If depth >= 100, cache with cacheTTL
+	// Return header bytes and the height for the handler to set appropriate cache headers
+	return header, height, nil
+}

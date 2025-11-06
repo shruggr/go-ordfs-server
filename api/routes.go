@@ -35,6 +35,9 @@ func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, blockH
 	app.Get("/v2/tx/:txid/beef", txHandler.GetBeef)
 	app.Get("/v2/tx/:txid/:outputIndex", txHandler.GetOutput)
 
+	// V2 block endpoints
+	app.Get("/v2/block/:hashOrHeight", blockHandler.GetBlockHeader)
+
 	app.Get("/preview/:b64HtmlData", frontendHandler.RenderPreview)
 	app.Post("/preview", frontendHandler.RenderPreviewPost)
 

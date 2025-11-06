@@ -18,4 +18,6 @@ type Loader interface {
 	LoadSpend(ctx context.Context, outpoint string) (*chainhash.Hash, error)
 	LoadMerkleProof(ctx context.Context, txid string) ([]byte, error)
 	LoadBeef(ctx context.Context, txid string) ([]byte, error)
+	LoadHeaderByHash(ctx context.Context, hash string) ([]byte, error)
+	LoadHeaderByHeight(ctx context.Context, height uint32) ([]byte, uint32, error)
 }

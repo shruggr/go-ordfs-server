@@ -43,7 +43,7 @@ paths:
       description: Returns the latest block header from the longest chain
       operationId: getLatestBlock
       tags:
-        - Block
+        - V1 API
       responses:
         '200':
           description: Latest block header (flattened structure)
@@ -60,7 +60,7 @@ paths:
       description: Returns block header for a specific height
       operationId: getBlockByHeight
       tags:
-        - Block
+        - V1 API
       parameters:
         - name: height
           in: path
@@ -86,7 +86,7 @@ paths:
       description: Returns block state for a specific hash
       operationId: getBlockByHash
       tags:
-        - Block
+        - V1 API
       parameters:
         - name: hash
           in: path
@@ -113,7 +113,7 @@ paths:
       description: Returns raw transaction bytes
       operationId: getRawTransaction
       tags:
-        - Transaction
+        - V1 API
       parameters:
         - name: txid
           in: path
@@ -141,7 +141,7 @@ paths:
       description: Returns raw transaction bytes in binary format
       operationId: getRawTransactionV2
       tags:
-        - Transaction
+        - V2 API
       parameters:
         - name: txid
           in: path
@@ -169,7 +169,7 @@ paths:
       description: Returns merkle proof for transaction verification
       operationId: getMerkleProof
       tags:
-        - Transaction
+        - V2 API
       parameters:
         - name: txid
           in: path
@@ -203,7 +203,7 @@ paths:
       description: Returns Background Evaluation Extended Format (BEEF) data with all transaction dependencies
       operationId: getBeef
       tags:
-        - Transaction
+        - V2 API
       parameters:
         - name: txid
           in: path
@@ -237,7 +237,7 @@ paths:
       description: Returns raw binary data for a specific transaction output
       operationId: getOutput
       tags:
-        - Transaction
+        - V2 API
       parameters:
         - name: txid
           in: path
@@ -265,6 +265,54 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '501':
           description: Not implemented yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v2/block/{hashOrHeight}:
+    get:
+      summary: Get block header in binary format
+      description: Returns raw binary block header (80 bytes). Accepts either block hash (64 hex characters) or block height (integer).
+      operationId: getBlockHeader
+      tags:
+        - V2 API
+      parameters:
+        - name: hashOrHeight
+          in: path
+          required: true
+          description: Block hash (64 hex characters) or block height (integer)
+          schema:
+            oneOf:
+              - type: string
+                pattern: '^[0-9a-fA-F]{64}$'
+              - type: integer
+                minimum: 0
+          examples:
+            byHash:
+              value: "000000000000000000d5c78530c2e25e8b8b8e2e2a8f8e8e2e2a8f8e8e2e2a8f"
+              summary: Query by block hash
+            byHeight:
+              value: 800000
+              summary: Query by block height
+      responses:
+        '200':
+          description: Raw binary block header (80 bytes)
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid hash or height format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Block header not found
           content:
             application/json:
               schema:
@@ -990,10 +1038,10 @@ components:
 tags:
   - name: Health
     description: Health check endpoints
-  - name: Block
-    description: Block information queries
-  - name: Transaction
-    description: Transaction data retrieval
+  - name: V1 API
+    description: Version 1 API endpoints (blocks and transactions)
+  - name: V2 API
+    description: Version 2 API endpoints (binary formats)
   - name: Preview
     description: HTML preview rendering
   - name: Content

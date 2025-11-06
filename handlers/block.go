@@ -6,15 +6,18 @@ import (
 
 	"github.com/b-open-io/overlay/headers"
 	"github.com/gofiber/fiber/v2"
+	"github.com/shruggr/go-ordfs-server/loader"
 )
 
 type BlockHandler struct {
 	headersClient *headers.Client
+	loader        loader.Loader
 }
 
-func NewBlockHandler(headersClient *headers.Client) *BlockHandler {
+func NewBlockHandler(headersClient *headers.Client, ldr loader.Loader) *BlockHandler {
 	return &BlockHandler{
 		headersClient: headersClient,
+		loader:        ldr,
 	}
 }
 
@@ -83,4 +86,80 @@ func (h *BlockHandler) GetByHash(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(state)
+}
+
+func (h *BlockHandler) GetBlockHeader(c *fiber.Ctx) error {
+	ctx := context.Background()
+	hashOrHeight := c.Params("hashOrHeight")
+
+	if hashOrHeight == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "hash or height required",
+		})
+	}
+
+	var header []byte
+	var err error
+	var blockHeight uint32
+
+	if len(hashOrHeight) == 64 {
+		header, err = h.loader.LoadHeaderByHash(ctx, hashOrHeight)
+		if err != nil {
+			if err == loader.ErrNotFound {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"error": "block header not found",
+				})
+			}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+		c.Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		height, parseErr := strconv.ParseUint(hashOrHeight, 10, 32)
+		if parseErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "invalid hash or height format",
+			})
+		}
+
+		header, blockHeight, err = h.loader.LoadHeaderByHeight(ctx, uint32(height))
+		if err != nil {
+			if err == loader.ErrNotFound {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+					"error": "block header not found",
+				})
+			}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		h.setCacheHeadersByBlockHeight(c, blockHeight)
+	}
+
+	c.Set("Content-Type", "application/octet-stream")
+	return c.Send(header)
+}
+
+func (h *BlockHandler) setCacheHeadersByBlockHeight(c *fiber.Ctx, blockHeight uint32) {
+	ctx := context.Background()
+
+	chaintip, err := h.headersClient.GetChaintip(ctx)
+	if err != nil {
+		c.Set("Cache-Control", "public, max-age=60")
+		return
+	}
+
+	depth := chaintip.Height - blockHeight
+
+	if depth >= 100 {
+		c.Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else if depth >= 4 {
+		c.Set("Cache-Control", "public, max-age=3600")
+	} else if depth >= 1 {
+		c.Set("Cache-Control", "public, max-age=60")
+	} else {
+		c.Set("Cache-Control", "public, max-age=10")
+	}
 }

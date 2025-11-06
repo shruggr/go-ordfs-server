@@ -76,6 +76,22 @@ func (m *mockLoader) addSpend(outpoint string, spendTxid string) error {
 	return nil
 }
 
+func (m *mockLoader) LoadMerkleProof(ctx context.Context, txid string) ([]byte, error) {
+	return nil, loader.ErrNotFound
+}
+
+func (m *mockLoader) LoadBeef(ctx context.Context, txid string) ([]byte, error) {
+	return nil, loader.ErrNotFound
+}
+
+func (m *mockLoader) LoadHeaderByHash(ctx context.Context, hash string) ([]byte, error) {
+	return nil, loader.ErrNotFound
+}
+
+func (m *mockLoader) LoadHeaderByHeight(ctx context.Context, height uint32) ([]byte, uint32, error) {
+	return nil, 0, loader.ErrNotFound
+}
+
 // Test chain data from scenarios.md
 const (
 	origin = "668fd698178715a2b8941e87a28b7ceb16bdb33656c8570e82d81ccebab3fdbb_0"
