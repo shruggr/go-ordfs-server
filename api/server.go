@@ -35,7 +35,7 @@ func NewServer(cfg *config.Config, redisCache *cache.RedisCache) *fiber.App {
 	ldr := loader.NewJungleBusLoader(redisCache.Client(), cfg.JunglebusURL)
 	contentHandler := handlers.NewContentHandler(ldr, redisCache)
 	blockHandler := handlers.NewBlockHandler(headersClient)
-	txHandler := handlers.NewTxHandler(ldr)
+	txHandler := handlers.NewTxHandler(ldr, headersClient)
 	dnsHandler := handlers.NewDNSHandler(ldr, frontendHandler, redisCache, cfg.OrdfsHost)
 
 	setupRoutes(app, contentHandler, blockHandler, txHandler, dnsHandler, frontendHandler)

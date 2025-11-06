@@ -645,7 +645,7 @@ func (o *Ordfs) forwardCrawl(ctx context.Context, req *ForwardCrawlRequest) (*Fo
 			currentSeq = mergedSeq
 		}
 
-		spendTxid, err := o.loader.GetSpend(ctx, currentOutpoint.OrdinalString())
+		spendTxid, err := o.loader.LoadSpend(ctx, currentOutpoint.OrdinalString())
 		if err != nil {
 			return nil, fmt.Errorf("failed to get spend: %w", err)
 		}

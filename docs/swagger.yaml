@@ -135,6 +135,143 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /v2/tx/{txid}:
+    get:
+      summary: Get raw transaction (v2)
+      description: Returns raw transaction bytes in binary format
+      operationId: getRawTransactionV2
+      tags:
+        - Transaction
+      parameters:
+        - name: txid
+          in: path
+          required: true
+          description: Transaction ID (64 hex characters)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{64}$'
+      responses:
+        '200':
+          description: Raw transaction bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v2/tx/{txid}/proof:
+    get:
+      summary: Get merkle proof for transaction
+      description: Returns merkle proof for transaction verification
+      operationId: getMerkleProof
+      tags:
+        - Transaction
+      parameters:
+        - name: txid
+          in: path
+          required: true
+          description: Transaction ID (64 hex characters)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{64}$'
+      responses:
+        '200':
+          description: Merkle proof data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '501':
+          description: Not implemented yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v2/tx/{txid}/beef:
+    get:
+      summary: Get BEEF data for transaction
+      description: Returns Background Evaluation Extended Format (BEEF) data with all transaction dependencies
+      operationId: getBeef
+      tags:
+        - Transaction
+      parameters:
+        - name: txid
+          in: path
+          required: true
+          description: Transaction ID (64 hex characters)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{64}$'
+      responses:
+        '200':
+          description: BEEF formatted transaction data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '501':
+          description: Not implemented yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v2/tx/{txid}/{outputIndex}:
+    get:
+      summary: Get specific transaction output
+      description: Returns raw binary data for a specific transaction output
+      operationId: getOutput
+      tags:
+        - Transaction
+      parameters:
+        - name: txid
+          in: path
+          required: true
+          description: Transaction ID (64 hex characters)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{64}$'
+        - name: outputIndex
+          in: path
+          required: true
+          description: Output index (vout)
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Raw output data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '501':
+          description: Not implemented yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /preview/{b64HtmlData}:
     get:
       summary: Render HTML preview

@@ -60,7 +60,7 @@ func (m *mockLoader) LoadOutput(ctx context.Context, outpoint *transaction.Outpo
 	return tx.Outputs[outpoint.Index], nil
 }
 
-func (m *mockLoader) GetSpend(ctx context.Context, outpoint string) (*chainhash.Hash, error) {
+func (m *mockLoader) LoadSpend(ctx context.Context, outpoint string) (*chainhash.Hash, error) {
 	if spend, ok := m.spends[outpoint]; ok {
 		return spend, nil
 	}

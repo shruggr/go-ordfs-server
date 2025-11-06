@@ -121,7 +121,7 @@ func (l *JungleBusLoader) parseOutput(bytes []byte) (*transaction.TransactionOut
 	}, nil
 }
 
-func (l *JungleBusLoader) GetSpend(ctx context.Context, outpoint string) (*chainhash.Hash, error) {
+func (l *JungleBusLoader) LoadSpend(ctx context.Context, outpoint string) (*chainhash.Hash, error) {
 	url := fmt.Sprintf("%s/v1/txo/spend/%s", l.junglebusURL, outpoint)
 	slog.Debug("Fetching spend from JungleBus", "url", url)
 
@@ -151,6 +151,76 @@ func (l *JungleBusLoader) GetSpend(ctx context.Context, outpoint string) (*chain
 	}
 
 	return txHash, nil
+}
+
+func (l *JungleBusLoader) LoadMerkleProof(ctx context.Context, txid string) ([]byte, error) {
+	cacheKey := "proof:" + txid
+
+	if proof, err := l.cache.Get(ctx, cacheKey).Bytes(); err == nil && len(proof) > 0 {
+		return proof, nil
+	}
+
+	url := fmt.Sprintf("%s/v1/transaction/proof/%s/bin", l.junglebusURL, txid)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		slog.Debug("Merkle proof not found in JungleBus", "txid", txid)
+		return nil, ErrNotFound
+	}
+
+	if resp.StatusCode != 200 {
+		slog.Debug("JungleBus error fetching merkle proof", "txid", txid, "status", resp.StatusCode)
+		return nil, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
+	}
+
+	proof, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	l.cache.Set(ctx, cacheKey, proof, cacheTTL)
+
+	return proof, nil
+}
+
+func (l *JungleBusLoader) LoadBeef(ctx context.Context, txid string) ([]byte, error) {
+	cacheKey := "beef:" + txid
+
+	if beef, err := l.cache.Get(ctx, cacheKey).Bytes(); err == nil && len(beef) > 0 {
+		return beef, nil
+	}
+
+	url := fmt.Sprintf("%s/v1/transaction/beef/%s", l.junglebusURL, txid)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		slog.Debug("BEEF not found in JungleBus", "txid", txid)
+		return nil, ErrNotFound
+	}
+
+	if resp.StatusCode != 200 {
+		slog.Debug("JungleBus error fetching BEEF", "txid", txid, "status", resp.StatusCode)
+		return nil, fmt.Errorf("junglebus returned status %d", resp.StatusCode)
+	}
+
+	beef, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	l.cache.Set(ctx, cacheKey, beef, cacheTTL)
+
+	return beef, nil
 }
 
 func (l *JungleBusLoader) loadRemoteRawtx(ctx context.Context, txid string) ([]byte, error) {
