@@ -159,7 +159,7 @@ func (h *DNSHandler) GetRoot(c *fiber.Ctx) error {
 		return c.Redirect(redirectURL)
 	}
 
-	return sendContentResponse(c, resp, seq)
+	return sendContentResponse(c, resp, seqPtr)
 }
 
 func (h *DNSHandler) HandleAll(c *fiber.Ctx) error {
@@ -180,7 +180,7 @@ func (h *DNSHandler) HandleAll(c *fiber.Ctx) error {
 		_, _, err := resolvePointerToOutpoint(parsed.Pointer)
 		if err == nil {
 			// Valid pointer - load directly (canonical host behavior)
-			return h.resolver.Resolve(ctx, c, parsed.Pointer, &parsed.Seq, parsed.FilePath)
+			return h.resolver.Resolve(ctx, c, parsed.Pointer, parsed.Seq, parsed.FilePath)
 		}
 	}
 

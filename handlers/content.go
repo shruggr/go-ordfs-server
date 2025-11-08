@@ -33,5 +33,5 @@ func (h *ContentHandler) HandleAll(c *fiber.Ctx) error {
 		})
 	}
 
-	return h.resolver.Resolve(ctx, c, parsed.Pointer, &parsed.Seq, parsed.FilePath)
+	return h.resolver.Resolve(ctx, c, parsed.Pointer, parsed.Seq, parsed.FilePath)
 }

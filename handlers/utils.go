@@ -17,7 +17,7 @@ import (
 	"github.com/shruggr/go-ordfs-server/ordfs"
 )
 
-func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq int) error {
+func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq *int) error {
 	slog.Debug("sendContentResponse called",
 		"contentType", resp.ContentType,
 		"outpoint", resp.Outpoint.OrdinalString(),
@@ -32,7 +32,7 @@ func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq int) error {
 	}
 	c.Set("X-Ord-Seq", fmt.Sprintf("%d", resp.Sequence))
 
-	if seq == -1 {
+	if seq == nil {
 		c.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	} else {
 		c.Set("Cache-Control", "public, max-age=86400, immutable")
@@ -63,7 +63,7 @@ func sendContentResponse(c *fiber.Ctx, resp *ordfs.Response, seq int) error {
 // PointerPath represents a parsed pointer path with optional seq and file path
 type PointerPath struct {
 	Pointer  string // raw pointer string (txid or outpoint, without seq)
-	Seq      int    // sequence number (-1 if not specified)
+	Seq      *int   // sequence number (nil if not specified)
 	FilePath string // remaining path after pointer (empty if none)
 }
 
@@ -95,14 +95,14 @@ func parsePointerPath(path string, prefixToStrip string) (*PointerPath, error) {
 	// Parse pointer and optional seq
 	parts := strings.SplitN(pointerWithSeq, ":", 2)
 	pointer := parts[0]
-	seq := -1
+	var seq *int
 
 	if len(parts) > 1 {
-		var err error
-		seq, err = strconv.Atoi(parts[1])
+		seqVal, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("invalid seq value: %s", parts[1])
 		}
+		seq = &seqVal
 	}
 
 	// Remaining segments form the file path
@@ -164,11 +164,6 @@ func NewDirectoryResolver(ordfsInstance *ordfs.Ordfs) *DirectoryResolver {
 //   - If filePath matches a file in directory, loads and returns that file
 //   - If filePath doesn't match (SPA fallback), loads and returns index.html
 func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer string, seq *int, filePath string) error {
-	if seq == nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "seq parameter is required",
-		})
-	}
 	slog.Debug("DirectoryResolver.Resolve started",
 		"pointer", pointer,
 		"seq", seq,
@@ -232,7 +227,7 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 
 	// If not a directory, serve content directly (ignore file path)
 	if resp.ContentType != "ord-fs/json" {
-		return sendContentResponse(c, resp, *seq)
+		return sendContentResponse(c, resp, seq)
 	}
 
 	// It's a directory - handle directory logic
@@ -246,7 +241,7 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 	// No file path provided - redirect to index.html (unless raw)
 	if filePath == "" {
 		if c.Query("raw") != "" {
-			return sendContentResponse(c, resp, *seq)
+			return sendContentResponse(c, resp, seq)
 		}
 		// Construct redirect URL with pointer
 		redirectURL := fmt.Sprintf("%s/index.html", c.Path())
@@ -305,5 +300,5 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 		})
 	}
 
-	return sendContentResponse(c, fileResp, -1)
+	return sendContentResponse(c, fileResp, nil)
 }
