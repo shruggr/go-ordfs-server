@@ -10,8 +10,6 @@ github.com/andybalholm/brotli v1.1.1 h1:PR2pgnyFznKEugtsUo0xLdDop5SKXd5Qf5ysW+7X
 github.com/andybalholm/brotli v1.1.1/go.mod h1:05ib4cKhjx3OQYUY22hTVd34Bc8upXjOLL2rKwwZBoA=
 github.com/b-open-io/go-templates v0.0.0-20251105170419-229170a11f26 h1:pH2XC+rWhJYtI/XEFt2zdG5tEbMLtw3Dt3F/B6XyEVU=
 github.com/b-open-io/go-templates v0.0.0-20251105170419-229170a11f26/go.mod h1:xFs0s0P1uT0cReDWg1kbTV1T/7Nm5yt42GKDn9bPjSw=
-github.com/b-open-io/overlay v0.3.1-0.20251029223636-861fd7c9ff6d h1:gV+qWqfs7kqNKGR2aPaYiuauZsEZhwt0FXp9QJ5KS8Y=
-github.com/b-open-io/overlay v0.3.1-0.20251029223636-861fd7c9ff6d/go.mod h1:s1tN6a2L207JGKsRcZEalXoGiE2epIs/mTRCbqqDkEo=
 github.com/bitcoinschema/go-bpu v0.2.2 h1:F/eIC8XhzwgptpA1+rgYQo8bzT51nVozdXpASsxPIno=
 github.com/bitcoinschema/go-bpu v0.2.2/go.mod h1:zppAI/4uAi+lSKBAc7QtWp98d+iczCB6CnGrGV75fAQ=
 github.com/bitcoinschema/go-sigma v0.1.2 h1:tFNlZZ8QnSokHlWL/39+NCzC1x2lTO3uOJhcvBkC1TE=

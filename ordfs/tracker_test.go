@@ -84,12 +84,20 @@ func (m *mockLoader) LoadBeef(ctx context.Context, txid string) ([]byte, error) 
 	return nil, loader.ErrNotFound
 }
 
-func (m *mockLoader) LoadHeaderByHash(ctx context.Context, hash string) ([]byte, error) {
+func (m *mockLoader) LoadHeaderByHash(ctx context.Context, hash string) (*loader.BlockHeaderResponse, error) {
 	return nil, loader.ErrNotFound
 }
 
-func (m *mockLoader) LoadHeaderByHeight(ctx context.Context, height uint32) ([]byte, uint32, error) {
-	return nil, 0, loader.ErrNotFound
+func (m *mockLoader) LoadHeaderByHeight(ctx context.Context, height uint32) (*loader.BlockHeaderResponse, error) {
+	return nil, loader.ErrNotFound
+}
+
+func (m *mockLoader) LoadTipHeader(ctx context.Context) (*loader.BlockHeaderResponse, error) {
+	return nil, loader.ErrNotFound
+}
+
+func (m *mockLoader) LoadChainHeight(ctx context.Context) (uint32, error) {
+	return 0, loader.ErrNotFound
 }
 
 // Test chain data from scenarios.md

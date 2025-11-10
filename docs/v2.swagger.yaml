@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: OrdFS Server API
+  title: OrdFS Server API - V2
   description: |
     API server for serving Bitcoin ordinal inscriptions and OrdFS content.
 
@@ -36,104 +36,6 @@ paths:
                   status:
                     type: string
                     example: ok
-
-  /v1/bsv/block/latest:
-    get:
-      summary: Get latest block
-      description: Returns the latest block header from the longest chain
-      operationId: getLatestBlock
-      tags:
-        - V1 API
-      responses:
-        '200':
-          description: Latest block header (flattened structure)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlockHeader'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /v1/bsv/block/height/{height}:
-    get:
-      summary: Get block by height
-      description: Returns block header for a specific height
-      operationId: getBlockByHeight
-      tags:
-        - V1 API
-      parameters:
-        - name: height
-          in: path
-          required: true
-          description: Block height
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Block header
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlockHeader'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /v1/bsv/block/hash/{hash}:
-    get:
-      summary: Get block by hash
-      description: Returns block state for a specific hash
-      operationId: getBlockByHash
-      tags:
-        - V1 API
-      parameters:
-        - name: hash
-          in: path
-          required: true
-          description: Block hash (64 hex characters)
-          schema:
-            type: string
-            pattern: '^[0-9a-fA-F]{64}$'
-      responses:
-        '200':
-          description: Block state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BlockState'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /v1/bsv/tx/{txid}:
-    get:
-      summary: Get raw transaction
-      description: Returns raw transaction bytes
-      operationId: getRawTransaction
-      tags:
-        - V1 API
-      parameters:
-        - name: txid
-          in: path
-          required: true
-          description: Transaction ID (64 hex characters)
-          schema:
-            type: string
-            pattern: '^[0-9a-fA-F]{64}$'
-      responses:
-        '200':
-          description: Raw transaction bytes
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
 
   /v2/tx/{txid}:
     get:
@@ -1038,8 +940,6 @@ components:
 tags:
   - name: Health
     description: Health check endpoints
-  - name: V1 API
-    description: Version 1 API endpoints (blocks and transactions)
   - name: V2 API
     description: Version 2 API endpoints (binary formats)
   - name: Preview

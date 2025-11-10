@@ -1,11 +1,10 @@
-package handlers
+package v2
 
 import (
 	"context"
 	"regexp"
 	"strconv"
 
-	"github.com/b-open-io/overlay/headers"
 	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/gofiber/fiber/v2"
 	"github.com/shruggr/go-ordfs-server/loader"
@@ -14,14 +13,12 @@ import (
 var txidPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 type TxHandler struct {
-	loader        loader.Loader
-	headersClient *headers.Client
+	loader loader.Loader
 }
 
-func NewTxHandler(ldr loader.Loader, headersClient *headers.Client) *TxHandler {
+func NewTxHandler(ldr loader.Loader) *TxHandler {
 	return &TxHandler{
-		loader:        ldr,
-		headersClient: headersClient,
+		loader: ldr,
 	}
 }
 
@@ -144,13 +141,13 @@ func (h *TxHandler) GetOutput(c *fiber.Ctx) error {
 func (h *TxHandler) setCacheHeadersByBlockHeight(c *fiber.Ctx, blockHeight uint32) {
 	ctx := context.Background()
 
-	chaintip, err := h.headersClient.GetChaintip(ctx)
+	chainHeight, err := h.loader.LoadChainHeight(ctx)
 	if err != nil {
 		c.Set("Cache-Control", "public, max-age=60")
 		return
 	}
 
-	depth := chaintip.Height - blockHeight
+	depth := chainHeight - blockHeight
 
 	if depth >= 100 {
 		c.Set("Cache-Control", "public, max-age=31536000, immutable")
