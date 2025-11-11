@@ -34,9 +34,10 @@ func NewServer(cfg *config.Config, redisCache *cache.RedisCache) *fiber.App {
 	v1TxHandler := v1.NewTxHandler(ldr)
 	v2BlockHandler := v2.NewBlockHandler(ldr)
 	v2TxHandler := v2.NewTxHandler(ldr)
+	v2MetadataHandler := v2.NewMetadataHandler(ldr, redisCache)
 	dnsHandler := handlers.NewDNSHandler(ldr, frontendHandler, redisCache, cfg.OrdfsHost)
 
-	setupRoutes(app, contentHandler, v1BlockHandler, v1TxHandler, v2BlockHandler, v2TxHandler, dnsHandler, frontendHandler)
+	setupRoutes(app, contentHandler, v1BlockHandler, v1TxHandler, v2BlockHandler, v2TxHandler, v2MetadataHandler, dnsHandler, frontendHandler)
 
 	return app
 }

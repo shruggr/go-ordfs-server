@@ -26,7 +26,7 @@ func NewContentHandler(ldr loader.Loader, redisCache *cache.RedisCache) *Content
 func (h *ContentHandler) HandleAll(c *fiber.Ctx) error {
 	ctx := context.Background()
 
-	parsed, err := parsePointerPath(c.Path(), "/content")
+	parsed, err := ParsePointerPath(c.Path(), "/content")
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fmt.Sprintf("invalid path: %v", err),

@@ -33,13 +33,14 @@ type Resolution struct {
 }
 
 type LoadRequest struct {
-	Outpoint *transaction.Outpoint
-	Origin   *transaction.Outpoint
-	Content  *transaction.Outpoint
-	Map      *transaction.Outpoint
-	Output   *transaction.Outpoint
-	Parent   *transaction.Outpoint
-	Sequence *int
+	Outpoint         *transaction.Outpoint
+	Origin           *transaction.Outpoint
+	Content          *transaction.Outpoint
+	Map              *transaction.Outpoint
+	Output           *transaction.Outpoint
+	Parent           *transaction.Outpoint
+	Sequence         *int
+	LoadContentBytes bool
 }
 
 type Response struct {

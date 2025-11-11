@@ -67,14 +67,14 @@ type PointerPath struct {
 	FilePath string // remaining path after pointer (empty if none)
 }
 
-// parsePointerPath parses a URL path to extract pointer, optional seq, and file path
+// ParsePointerPath parses a URL path to extract pointer, optional seq, and file path
 // Format: /prefix/pointer[:seq][/file/path]
 // Examples:
 //   - /content/abc123_0 -> {Pointer: "abc123_0", Seq: -1, FilePath: ""}
 //   - /content/abc123_0:5 -> {Pointer: "abc123_0", Seq: 5, FilePath: ""}
 //   - /content/abc123_0:5/style.css -> {Pointer: "abc123_0", Seq: 5, FilePath: "style.css"}
 //   - /abc123 -> {Pointer: "abc123", Seq: -1, FilePath: ""}
-func parsePointerPath(path string, prefixToStrip string) (*PointerPath, error) {
+func ParsePointerPath(path string, prefixToStrip string) (*PointerPath, error) {
 	// Strip the prefix (e.g., "/content")
 	path = strings.TrimPrefix(path, prefixToStrip)
 	path = strings.TrimPrefix(path, "/")
@@ -118,9 +118,9 @@ func parsePointerPath(path string, prefixToStrip string) (*PointerPath, error) {
 	}, nil
 }
 
-// resolvePointerToOutpoint attempts to parse pointer as either txid or outpoint
+// ResolvePointerToOutpoint attempts to parse pointer as either txid or outpoint
 // Returns outpoint and whether it was a txid (needs _0 appended)
-func resolvePointerToOutpoint(pointer string) (*transaction.Outpoint, bool, error) {
+func ResolvePointerToOutpoint(pointer string) (*transaction.Outpoint, bool, error) {
 	// Try as outpoint first
 	if strings.Contains(pointer, "_") || strings.Contains(pointer, ".") {
 		outpoint, err := transaction.OutpointFromString(pointer)
@@ -170,7 +170,7 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 		"filePath", filePath)
 
 	// Determine if pointer is txid or outpoint
-	outpoint, isTxid, err := resolvePointerToOutpoint(pointer)
+	outpoint, isTxid, err := ResolvePointerToOutpoint(pointer)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fmt.Sprintf("invalid pointer: %v", err),
@@ -263,7 +263,7 @@ func (r *DirectoryResolver) Resolve(ctx context.Context, c *fiber.Ctx, pointer s
 
 	// Load the file
 	filePointer = strings.TrimPrefix(filePointer, "ord://")
-	fileOutpoint, isTxid, err := resolvePointerToOutpoint(filePointer)
+	fileOutpoint, isTxid, err := ResolvePointerToOutpoint(filePointer)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fmt.Sprintf("invalid file pointer: %v", err),

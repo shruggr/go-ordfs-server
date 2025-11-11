@@ -55,14 +55,13 @@ func (o *Ordfs) Load(ctx context.Context, req *Request) (*Response, error) {
 	}
 
 	loadReq = &LoadRequest{
-		Outpoint: fullResolution.Current,
-		Origin:   fullResolution.Origin,
-		Sequence: &fullResolution.Sequence,
+		Outpoint:         fullResolution.Current,
+		Origin:           fullResolution.Origin,
+		Sequence:         &fullResolution.Sequence,
+		Content:          fullResolution.Content,
+		LoadContentBytes: req.Content,
 	}
 
-	if req.Content {
-		loadReq.Content = fullResolution.Content
-	}
 	if req.Map {
 		loadReq.Map = fullResolution.Map
 	}
@@ -76,10 +75,6 @@ func (o *Ordfs) Load(ctx context.Context, req *Request) (*Response, error) {
 	response, err := o.LoadResolution(ctx, loadReq)
 	if err != nil {
 		return nil, err
-	}
-
-	if !req.Content {
-		response.Content = nil
 	}
 
 	return response, nil
@@ -676,12 +671,12 @@ func (o *Ordfs) forwardCrawl(ctx context.Context, req *ForwardCrawlRequest) (*Fo
 	}, nil
 }
 
-func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, mapOutpoint *transaction.Outpoint) (map[string]string, error) {
+func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint, mapOutpoint *transaction.Outpoint) (map[string]any, error) {
 	mergedKey := fmt.Sprintf("merged:%s", mapOutpoint.OrdinalString())
 
 	cached := o.cache.Get(ctx, mergedKey).Val()
 	if cached != "" {
-		var mergedMap map[string]string
+		var mergedMap map[string]any
 		if err := json.Unmarshal([]byte(cached), &mergedMap); err == nil {
 			return mergedMap, nil
 		}
@@ -695,7 +690,7 @@ func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint,
 		Max: fmt.Sprintf("%f", mapScore),
 	}).Val()
 
-	mergedMap := make(map[string]string)
+	mergedMap := make(map[string]any)
 	for _, outpointStr := range mapOutpoints {
 		outpoint, err := transaction.OutpointFromString(outpointStr)
 		if err != nil {
@@ -703,7 +698,7 @@ func (o *Ordfs) loadMergedMap(ctx context.Context, origin *transaction.Outpoint,
 		}
 
 		cacheKey := fmt.Sprintf("parsed:%s", outpoint.OrdinalString())
-		var individualMap map[string]string
+		var individualMap map[string]any
 
 		mapJSON := o.cache.HGet(ctx, cacheKey, "map").Val()
 		if mapJSON != "" {
@@ -824,7 +819,7 @@ func (o *Ordfs) LoadResolution(ctx context.Context, req *LoadRequest) (response 
 	}
 
 	if req.Content != nil {
-		resp, err := o.loadAndParse(ctx, req.Content, true)
+		resp, err := o.loadAndParse(ctx, req.Content, req.LoadContentBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load content: %w", err)
 		}
@@ -838,7 +833,7 @@ func (o *Ordfs) LoadResolution(ctx context.Context, req *LoadRequest) (response 
 		if req.Sequence == nil {
 			var cachedResponse *Response
 			if cachedResponse = contentCache[*req.Content]; cachedResponse == nil {
-				cachedResponse, err = o.loadAndParse(ctx, req.Content, true)
+				cachedResponse, err = o.loadAndParse(ctx, req.Content, false)
 				if err != nil {
 					return nil, fmt.Errorf("failed to load content: %w", err)
 				}
@@ -884,16 +879,6 @@ func (o *Ordfs) Resolve(ctx context.Context, requestedOutpoint *transaction.Outp
 	slog.Debug("Resolve started",
 		"requestedOutpoint", requestedOutpoint.OrdinalString(),
 		"seq", seq)
-
-	// if seq == nil {
-	// 	return &Resolution{
-	// 		Origin:   requestedOutpoint,
-	// 		Current:  requestedOutpoint,
-	// 		Content:  requestedOutpoint,
-	// 		Map:      requestedOutpoint,
-	// 		Sequence: nil,
-	// 	}, nil
-	// }
 
 	knownOriginStr := o.cache.HGet(ctx, "origins", requestedOutpoint.OrdinalString()).Val()
 	var origin *transaction.Outpoint

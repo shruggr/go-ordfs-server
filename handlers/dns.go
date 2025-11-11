@@ -173,11 +173,11 @@ func (h *DNSHandler) HandleAll(c *fiber.Ctx) error {
 	}
 
 	// Try to parse path as pointer with optional seq and file path
-	parsed, parseErr := parsePointerPath(path, "")
+	parsed, parseErr := ParsePointerPath(path, "")
 
 	// If successfully parsed as pointer, try direct load
 	if parseErr == nil {
-		_, _, err := resolvePointerToOutpoint(parsed.Pointer)
+		_, _, err := ResolvePointerToOutpoint(parsed.Pointer)
 		if err == nil {
 			// Valid pointer - load directly (canonical host behavior)
 			return h.resolver.Resolve(ctx, c, parsed.Pointer, parsed.Seq, parsed.FilePath)

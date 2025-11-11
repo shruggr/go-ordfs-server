@@ -98,7 +98,8 @@ func (o *Ordfs) parseOutput(ctx context.Context, outpoint *transaction.Outpoint,
 	// Try B protocol
 	if bc := bitcom.Decode(&lockingScript); bc != nil {
 		for _, proto := range bc.Protocols {
-			if proto.Protocol == bitcom.MapPrefix {
+			switch proto.Protocol {
+			case bitcom.MapPrefix:
 				if mapProto := bitcom.DecodeMap(proto.Script); mapProto != nil && mapProto.Cmd == bitcom.MapCmdSet {
 					if mapData == nil {
 						mapData = make(map[string]string)
@@ -107,7 +108,7 @@ func (o *Ordfs) parseOutput(ctx context.Context, outpoint *transaction.Outpoint,
 						mapData[k] = v
 					}
 				}
-			} else if proto.Protocol == bitcom.BPrefix {
+			case bitcom.BPrefix:
 				// B protocol content
 				bProto := bitcom.DecodeB(proto.Script)
 				if bProto != nil && len(bProto.Data) > 0 {
@@ -136,7 +137,26 @@ func (o *Ordfs) parseOutput(ctx context.Context, outpoint *transaction.Outpoint,
 		cacheData["contentLength"] = len(content)
 	}
 	if mapData != nil {
-		if mapBytes, err := json.Marshal(mapData); err == nil {
+		mapDataAny := make(map[string]any)
+		for k, v := range mapData {
+			mapDataAny[k] = v
+		}
+
+		if subTypeData, ok := mapData["subTypeData"]; ok && subTypeData != "" {
+			var parsedSubTypeData map[string]any
+			if err := json.Unmarshal([]byte(subTypeData), &parsedSubTypeData); err == nil {
+				mapDataAny["subTypeData"] = parsedSubTypeData
+			}
+		}
+
+		if royalties, ok := mapData["royalties"]; ok && royalties != "" {
+			var parsedRoyalties []map[string]any
+			if err := json.Unmarshal([]byte(royalties), &parsedRoyalties); err == nil {
+				mapDataAny["royalties"] = parsedRoyalties
+			}
+		}
+
+		if mapBytes, err := json.Marshal(mapDataAny); err == nil {
 			mapJSON = string(mapBytes)
 			cacheData["map"] = mapJSON
 		}

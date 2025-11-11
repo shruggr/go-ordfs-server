@@ -5,18 +5,25 @@
  │               http://127.0.0.1:3000               │ 
  │       (bound on host 0.0.0.0 and port 3000)       │ 
  │                                                   │ 
- │ Handlers ............ 40  Processes ........... 1 │ 
- │ Prefork ....... Disabled  PID ............. 90285 │ 
+ │ Handlers ............ 45  Processes ........... 1 │ 
+ │ Prefork ....... Disabled  PID ............. 70657 │ 
  └───────────────────────────────────────────────────┘ 
 
-22:02:58 | 200 |       732.5µs | 127.0.0.1 | GET | index.html | -
-22:02:58 | 200 |      153.75µs | 127.0.0.1 | GET | swagger-ui.css | -
-22:02:58 | 200 |     173.041µs | 127.0.0.1 | GET | swagger-ui-bundle.js | -
-22:02:58 | 200 |      17.833µs | 127.0.0.1 | GET | swagger-ui-standalone-preset.js | -
-22:02:58 | 200 |    2.032375ms | 127.0.0.1 | GET | /v2/docs/swagger.yaml | -
-22:02:58 | 200 |       7.291µs | 127.0.0.1 | GET | favicon-32x32.png | -
-22:03:09 | 200 |     568.417µs | 127.0.0.1 | GET | index.html | -
-22:03:09 | 200 |      18.458µs | 127.0.0.1 | GET | swagger-ui.css | -
-22:03:09 | 200 |      20.292µs | 127.0.0.1 | GET | swagger-ui-bundle.js | -
-22:03:09 | 200 |       8.625µs | 127.0.0.1 | GET | swagger-ui-standalone-preset.js | -
-22:03:09 | 200 |    1.088417ms | 127.0.0.1 | GET | /v1/docs/swagger.yaml | -
+21:37:43 | 500 | 10.328981666s | 127.0.0.1 | GET | /v2/metadata/5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0:-1 | -
+{"time":"2025-11-10T21:38:04.231524-05:00","level":"DEBUG","msg":"Resolve started","requestedOutpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","seq":-1}
+{"time":"2025-11-10T21:38:04.231729-05:00","level":"DEBUG","msg":"Starting backward crawl","outpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0"}
+{"time":"2025-11-10T21:38:08.86601-05:00","level":"DEBUG","msg":"calculatePreviousOrdinalInput","outpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","txid":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5","outputIndex":0,"numOutputs":1,"numInputs":2,"ordinalOffset":0}
+{"time":"2025-11-10T21:38:10.10548-05:00","level":"DEBUG","msg":"Checking input","inputIndex":0,"prevOutpoint":"c4a9bffc36ce230d489a6a762692f27280deaaba0796099313d98350e8e7cb71_6","prevSatoshis":50,"cumulativeSats":0,"ordinalOffset":0}
+{"time":"2025-11-10T21:38:10.105558-05:00","level":"DEBUG","msg":"Found offset but not 1-sat","satoshis":50}
+{"time":"2025-11-10T21:38:10.105573-05:00","level":"DEBUG","msg":"Found origin","outpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","depth":0}
+{"time":"2025-11-10T21:38:10.105621-05:00","level":"DEBUG","msg":"Migrating to origin","requestedOutpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","origin":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","offset":0,"chainLength":1}
+{"time":"2025-11-10T21:38:10.105876-05:00","level":"DEBUG","msg":"Migration complete","origin":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0"}
+{"time":"2025-11-10T21:38:10.106322-05:00","level":"DEBUG","msg":"Resolved origin and calculated target","origin":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","requestedAbsoluteSeq":0,"relativeSeq":-1,"targetAbsoluteSeq":-1}
+{"time":"2025-11-10T21:38:10.106552-05:00","level":"DEBUG","msg":"Resuming crawl from cached position","seq":0,"outpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0"}
+{"time":"2025-11-10T21:38:10.106584-05:00","level":"DEBUG","msg":"Starting forward crawl","origin":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","start":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","startSeq":0,"targetSeq":-1,"parentValidation":false}
+{"time":"2025-11-10T21:38:10.10756-05:00","level":"DEBUG","msg":"Forward crawl step","seq":0,"outpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","hasContent":true,"hasMap":true}
+{"time":"2025-11-10T21:38:10.107708-05:00","level":"DEBUG","msg":"Fetching spend from JungleBus","url":"https://texas1.junglebus.gorillapool.io/v1/txo/spend/5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0"}
+{"time":"2025-11-10T21:38:10.672807-05:00","level":"DEBUG","msg":"Reached end of chain","seq":0}
+{"time":"2025-11-10T21:38:10.672915-05:00","level":"DEBUG","msg":"Forward crawl complete","finalSeq":0,"finalOutpoint":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0"}
+{"time":"2025-11-10T21:38:10.674034-05:00","level":"DEBUG","msg":"Resolve complete","origin":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","current":"5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0","seq":0,"hasContent":true,"hasMap":true}
+21:38:01 | 200 |  9.045574667s | 127.0.0.1 | GET | /v2/metadata/5da4474a511d0c814f2e812927fe5e867f8b6e8c4bbfbcae19546962d83b03d5_0:-1 | -
