@@ -30,6 +30,7 @@ func NewServer(cfg *config.Config, redisCache *cache.RedisCache) *fiber.App {
 
 	ldr := loader.NewJungleBusLoader(redisCache.Client(), cfg.JunglebusURL)
 	contentHandler := handlers.NewContentHandler(ldr, redisCache)
+	streamHandler := handlers.NewStreamHandler(ldr, redisCache)
 	v1BlockHandler := v1.NewBlockHandler(ldr)
 	v1TxHandler := v1.NewTxHandler(ldr)
 	v2BlockHandler := v2.NewBlockHandler(ldr)
@@ -37,7 +38,7 @@ func NewServer(cfg *config.Config, redisCache *cache.RedisCache) *fiber.App {
 	v2MetadataHandler := v2.NewMetadataHandler(ldr, redisCache)
 	dnsHandler := handlers.NewDNSHandler(ldr, frontendHandler, redisCache, cfg.OrdfsHost)
 
-	setupRoutes(app, contentHandler, v1BlockHandler, v1TxHandler, v2BlockHandler, v2TxHandler, v2MetadataHandler, dnsHandler, frontendHandler)
+	setupRoutes(app, contentHandler, streamHandler, v1BlockHandler, v1TxHandler, v2BlockHandler, v2TxHandler, v2MetadataHandler, dnsHandler, frontendHandler)
 
 	return app
 }

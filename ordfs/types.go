@@ -68,3 +68,17 @@ type ForwardCrawlResponse struct {
 	Sequence    int
 	ParentFound bool
 }
+
+type StreamRequest struct {
+	Outpoint   *transaction.Outpoint
+	RangeStart *int64
+	RangeEnd   *int64
+}
+
+type StreamResponse struct {
+	Origin        *transaction.Outpoint
+	ContentType   string
+	BytesWritten  int64
+	FinalSequence int
+	StreamEnded   bool
+}

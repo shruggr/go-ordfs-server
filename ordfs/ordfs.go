@@ -3,7 +3,9 @@ package ordfs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -1096,4 +1098,166 @@ func (o *Ordfs) mergeExistingChain(ctx context.Context, origin *transaction.Outp
 	newSequence := currentSeq + len(existingSpends)
 
 	return lastOutpoint, newSequence, nil
+}
+
+func (o *Ordfs) StreamContent(ctx context.Context, req *StreamRequest, writer io.Writer) (*StreamResponse, error) {
+	knownOriginStr := o.cache.HGet(ctx, "origins", req.Outpoint.OrdinalString()).Val()
+	var origin *transaction.Outpoint
+
+	if knownOriginStr != "" {
+		var err error
+		origin, err = transaction.OutpointFromString(knownOriginStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse known origin: %w", err)
+		}
+		slog.Debug("Found known origin for streaming", "origin", origin.OrdinalString())
+	} else {
+		var err error
+		origin, err = o.backwardCrawl(ctx, req.Outpoint)
+		if err != nil {
+			return nil, fmt.Errorf("backward crawl failed: %w", err)
+		}
+	}
+
+	currentOutpoint := req.Outpoint
+	relativeSeq := 0
+	var cumulativeBytes int64 = 0
+	var bytesWritten int64 = 0
+	var contentType string
+	var rangeStartFound bool = req.RangeStart == nil
+
+	slog.Debug("Starting stream", "outpoint", req.Outpoint.OrdinalString(), "origin", origin.OrdinalString(), "rangeStart", req.RangeStart, "rangeEnd", req.RangeEnd)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return &StreamResponse{
+				Origin:        origin,
+				ContentType:   contentType,
+				BytesWritten:  bytesWritten,
+				FinalSequence: relativeSeq,
+				StreamEnded:   false,
+			}, ctx.Err()
+		default:
+		}
+
+		output, err := o.loader.LoadOutput(ctx, currentOutpoint)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load output: %w", err)
+		}
+
+		resp := o.parseOutput(ctx, currentOutpoint, output, true)
+
+		if relativeSeq == 0 {
+			contentType = resp.ContentType
+		}
+
+		if resp.Content != nil && len(resp.Content) > 0 {
+			chunkSize := int64(len(resp.Content))
+			chunkStart := int64(0)
+			chunkEnd := chunkSize
+
+			if req.RangeStart != nil && !rangeStartFound {
+				if cumulativeBytes+chunkSize > *req.RangeStart {
+					chunkStart = *req.RangeStart - cumulativeBytes
+					rangeStartFound = true
+				}
+			}
+
+			if req.RangeEnd != nil && rangeStartFound {
+				bytesFromRangeStart := cumulativeBytes - (*req.RangeStart)
+				if bytesFromRangeStart+chunkSize > *req.RangeEnd-*req.RangeStart {
+					chunkEnd = *req.RangeEnd - *req.RangeStart - bytesFromRangeStart
+				}
+			}
+
+			if rangeStartFound && chunkStart < chunkEnd {
+				n, err := writer.Write(resp.Content[chunkStart:chunkEnd])
+				if err != nil {
+					return &StreamResponse{
+						Origin:        origin,
+						ContentType:   contentType,
+						BytesWritten:  bytesWritten,
+						FinalSequence: relativeSeq,
+						StreamEnded:   false,
+					}, fmt.Errorf("failed to write content: %w", err)
+				}
+				bytesWritten += int64(n)
+
+				if req.RangeEnd != nil && bytesWritten >= *req.RangeEnd-*req.RangeStart {
+					slog.Debug("Reached range end", "bytesWritten", bytesWritten)
+					return &StreamResponse{
+						Origin:        origin,
+						ContentType:   contentType,
+						BytesWritten:  bytesWritten,
+						FinalSequence: relativeSeq,
+						StreamEnded:   true,
+					}, nil
+				}
+			}
+
+			cumulativeBytes += chunkSize
+		}
+
+		if relativeSeq > 0 && resp.ContentType != "ordfs/stream" {
+			slog.Debug("Stream ended - content type changed", "seq", relativeSeq, "contentType", resp.ContentType)
+			return &StreamResponse{
+				Origin:        origin,
+				ContentType:   contentType,
+				BytesWritten:  bytesWritten,
+				FinalSequence: relativeSeq,
+				StreamEnded:   true,
+			}, nil
+		}
+
+		spendTxid, err := o.loader.LoadSpend(ctx, currentOutpoint.OrdinalString())
+		if err != nil {
+			if errors.Is(err, loader.ErrNotFound) {
+				slog.Debug("Stream ended - output not spent", "seq", relativeSeq)
+				return &StreamResponse{
+					Origin:        origin,
+					ContentType:   contentType,
+					BytesWritten:  bytesWritten,
+					FinalSequence: relativeSeq,
+					StreamEnded:   true,
+				}, nil
+			}
+			return nil, fmt.Errorf("failed to load spend: %w", err)
+		}
+
+		if spendTxid == nil {
+			slog.Debug("Stream ended - no spend found", "seq", relativeSeq)
+			return &StreamResponse{
+				Origin:        origin,
+				ContentType:   contentType,
+				BytesWritten:  bytesWritten,
+				FinalSequence: relativeSeq,
+				StreamEnded:   true,
+			}, nil
+		}
+
+		spendTx, err := o.loader.LoadTx(ctx, spendTxid.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to load spending tx: %w", err)
+		}
+
+		nextOutpoint, err := o.calculateOrdinalOutput(ctx, spendTx, currentOutpoint)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate ordinal output: %w", err)
+		}
+
+		if nextOutpoint == nil {
+			slog.Debug("Stream ended - no ordinal output found", "seq", relativeSeq)
+			return &StreamResponse{
+				Origin:        origin,
+				ContentType:   contentType,
+				BytesWritten:  bytesWritten,
+				FinalSequence: relativeSeq,
+				StreamEnded:   true,
+			}, nil
+		}
+
+		currentOutpoint = nextOutpoint
+		relativeSeq++
+	}
 }

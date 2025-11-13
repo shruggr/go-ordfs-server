@@ -8,7 +8,7 @@ import (
 	v2 "github.com/shruggr/go-ordfs-server/handlers/v2"
 )
 
-func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, v1BlockHandler *v1.BlockHandler, v1TxHandler *v1.TxHandler, v2BlockHandler *v2.BlockHandler, v2TxHandler *v2.TxHandler, v2MetadataHandler *v2.MetadataHandler, dnsHandler *handlers.DNSHandler, frontendHandler *handlers.FrontendHandler) {
+func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, streamHandler *handlers.StreamHandler, v1BlockHandler *v1.BlockHandler, v1TxHandler *v1.TxHandler, v2BlockHandler *v2.BlockHandler, v2TxHandler *v2.TxHandler, v2MetadataHandler *v2.MetadataHandler, dnsHandler *handlers.DNSHandler, frontendHandler *handlers.FrontendHandler) {
 	app.Static("/public", "./frontend/public")
 
 	// Serve v1 swagger file
@@ -55,6 +55,7 @@ func setupRoutes(app *fiber.App, contentHandler *handlers.ContentHandler, v1Bloc
 	app.Get("/v2/chain/height", v2BlockHandler.GetChainHeight)
 	app.Get("/v2/block/:hashOrHeight", v2BlockHandler.GetBlockHeader)
 	app.Get("/v2/metadata/*", v2MetadataHandler.GetMetadata)
+	app.Get("/v2/stream/:outpoint", streamHandler.HandleStream)
 
 	app.Get("/preview/:b64HtmlData", frontendHandler.RenderPreview)
 	app.Post("/preview", frontendHandler.RenderPreviewPost)
